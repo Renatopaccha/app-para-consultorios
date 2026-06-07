@@ -1,13 +1,86 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reviews      Review[]
+  appointments Appointment[]
+}
+
+model Clinic {
+  id               String   @id @default(uuid())
+  name             String
+  address          String
+  phone            String?
+  hasGroupDiscount Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  doctors Doctor[]
+  reviews Review[]
+}
+
+model Doctor {
+  id                 String   @id @default(uuid())
+  name               String
+  specialty          String
+  consultationPrice  Float
+  isIndependent      Boolean  @default(true)
+  clinicId           String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  clinic       Clinic?       @relation(fields: [clinicId], references: [id])
+  reviews      Review[]
+  appointments Appointment[]
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  rating    Int // Se espera un valor del 1 al 5
+  comment   String?
+  authorId  String
+  doctorId  String?
+  clinicId  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author User    @relation(fields: [authorId], references: [id])
+  doctor Doctor? @relation(fields: [doctorId], references: [id])
+  clinic Clinic? @relation(fields: [clinicId], references: [id])
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+model Appointment {
+  id        String            @id @default(uuid())
+  patientId String
+  doctorId  String
+  date      DateTime
+  status    AppointmentStatus @default(PENDING)
+  notes     String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  patient User   @relation(fields: [patientId], references: [id])
+  doctor  Doctor @relation(fields: [doctorId], references: [id])
 }
