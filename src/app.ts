@@ -2,6 +2,12 @@ import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
+import userRoutes from './routes/user.routes';
+import clinicRoutes from './routes/clinic.routes';
+import doctorRoutes from './routes/doctor.routes';
+import reviewRoutes from './routes/review.routes';
+import appointmentRoutes from './routes/appointment.routes';
+
 // Cargar variables de entorno
 dotenv.config();
 
@@ -16,6 +22,11 @@ app.get('/', (req: Request, res: Response) => {
   res.send('API de Vitali funcionando');
 });
 
-// Aquí irán las rutas específicas usando app.use(...) en el futuro
+// Rutas de la API
+app.use('/api/users', userRoutes);
+app.use('/api/clinics', clinicRoutes);
+app.use('/api/doctors', doctorRoutes);
+app.use('/api/reviews', reviewRoutes);
+app.use('/api/appointments', appointmentRoutes);
 
 export default app;
