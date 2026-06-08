@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
   output   = "../generated/prisma"
@@ -10,77 +7,214 @@ datasource db {
   provider = "postgresql"
 }
 
-model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  phone     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  reviews      Review[]
-  appointments Appointment[]
-}
-
-model Clinic {
-  id               String   @id @default(uuid())
-  name             String
-  address          String
-  phone            String?
-  hasGroupDiscount Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  doctors Doctor[]
-  reviews Review[]
-}
-
-model Doctor {
-  id                 String   @id @default(uuid())
-  name               String
-  specialty          String
-  consultationPrice  Float
-  isIndependent      Boolean  @default(true)
-  clinicId           String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  clinic       Clinic?       @relation(fields: [clinicId], references: [id])
-  reviews      Review[]
-  appointments Appointment[]
-}
-
-model Review {
-  id        String   @id @default(uuid())
-  rating    Int // Se espera un valor del 1 al 5
-  comment   String?
-  authorId  String
-  doctorId  String?
-  clinicId  String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  author User    @relation(fields: [authorId], references: [id])
-  doctor Doctor? @relation(fields: [doctorId], references: [id])
-  clinic Clinic? @relation(fields: [clinicId], references: [id])
+enum Role {
+  PATIENT
+  DOCTOR
+  CLINIC_ADMIN
+  SUPER_ADMIN
 }
 
 enum AppointmentStatus {
   PENDING
   CONFIRMED
+  COMPLETED
   CANCELLED
 }
 
-model Appointment {
-  id        String            @id @default(uuid())
-  patientId String
-  doctorId  String
-  date      DateTime
-  status    AppointmentStatus @default(PENDING)
-  notes     String?
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+}
 
-  patient User   @relation(fields: [patientId], references: [id])
-  doctor  Doctor @relation(fields: [doctorId], references: [id])
+enum SubscriptionStatus {
+  ACTIVE
+  GRACE_PERIOD
+  INACTIVE
+}
+
+enum PayerType {
+  SELF
+  CLINIC
+}
+
+model User {
+  id                     String    @id @default(uuid())
+  firstName              String
+  lastName               String
+  email                  String    @unique
+  phone                  String?
+  role                   Role      @default(PATIENT)
+  
+  // Auth
+  passwordHash           String?
+  provider               String?   // "google", "apple", "local"
+  
+  // Seguridad
+  resetPasswordToken     String?   @unique
+  resetPasswordExpires   DateTime?
+  twoFactorCode          String?
+  twoFactorCodeExpires   DateTime?
+
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  // Relaciones
+  appointmentsAsPatient  Appointment[] @relation("PatientAppointments")
+  reviewsGiven           Review[]      @relation("PatientReviews")
+  
+  @@index([email])
+  @@index([resetPasswordToken])
+  @@index([role])
+}
+
+model Clinic {
+  id                 String             @id @default(uuid())
+  name               String
+  address            String
+  latitude           Float?
+  longitude          Float?
+  phone              String?
+  
+  // Pagos y Suscripciones
+  stripeAccountId    String?
+  subscriptionStatus SubscriptionStatus @default(INACTIVE)
+  
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  // Relaciones
+  doctors            DoctorLocation[]
+  appointments       Appointment[]
+  specialties        Specialty[]        
+  insurances         Insurance[]        
+
+  @@index([latitude, longitude])
+  @@index([subscriptionStatus])
+}
+
+model Doctor {
+  id                      String             @id @default(uuid())
+  licenseNumber           String             @unique
+  isVerified              Boolean            @default(false)
+  consultationPrice       Float
+  
+  // Pagos y Suscripciones
+  stripeAccountId         String?
+  subscriptionStatus      SubscriptionStatus @default(INACTIVE)
+  subscriptionValidUntil  DateTime?
+  paidBy                  PayerType          @default(SELF)
+
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  // Relaciones
+  locations               DoctorLocation[]
+  appointments            Appointment[]
+  reviews                 Review[]
+  specialties             Specialty[]        
+  insurances              Insurance[]        
+
+  @@index([isVerified])
+  @@index([subscriptionStatus])
+}
+
+model DoctorLocation {
+  id         String    @id @default(uuid())
+  doctorId   String
+  clinicId   String
+  isActive   Boolean   @default(true)
+  joinedAt   DateTime  @default(now())
+  leftAt     DateTime?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  doctor     Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  clinic     Clinic    @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, clinicId])
+  @@index([doctorId])
+  @@index([clinicId])
+  @@index([isActive])
+}
+
+model Specialty {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relaciones
+  doctors     Doctor[]
+  clinics     Clinic[]
+
+  @@index([name])
+}
+
+model Insurance {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relaciones
+  doctors     Doctor[]
+  clinics     Clinic[]
+
+  @@index([name])
+}
+
+model Appointment {
+  id                  String            @id @default(uuid())
+  patientId           String
+  doctorId            String
+  clinicId            String
+  
+  date                DateTime
+  time                String            
+  status              AppointmentStatus @default(PENDING)
+  
+  // Pagos
+  paymentStatus       PaymentStatus     @default(PENDING)
+  stripeTransactionId String?           @unique
+  commissionAmount    Float?
+
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  // Relaciones
+  patient             User              @relation("PatientAppointments", fields: [patientId], references: [id])
+  doctor              Doctor            @relation(fields: [doctorId], references: [id])
+  clinic              Clinic            @relation(fields: [clinicId], references: [id])
+  review              Review?           
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([clinicId])
+  @@index([date])
+  @@index([status])
+}
+
+model Review {
+  id            String   @id @default(uuid())
+  appointmentId String   @unique
+  patientId     String
+  doctorId      String
+  
+  rating        Int      
+  comment       String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  patient       User        @relation("PatientReviews", fields: [patientId], references: [id])
+  doctor        Doctor      @relation(fields: [doctorId], references: [id])
+
+  @@index([doctorId])
+  @@index([patientId])
 }
