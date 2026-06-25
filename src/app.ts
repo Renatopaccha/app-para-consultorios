@@ -8,6 +8,7 @@ import clinicRoutes from './routes/clinic.routes';
 import doctorRoutes from './routes/doctor.routes';
 import reviewRoutes from './routes/review.routes';
 import appointmentRoutes from './routes/appointment.routes';
+import patientRoutes from './routes/patient.routes';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -30,5 +31,6 @@ app.use('/api/clinics', clinicRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/appointments', appointmentRoutes);
+app.use('/api/patients', patientRoutes);
 
 export default app;

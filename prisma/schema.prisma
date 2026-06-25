@@ -11,7 +11,7 @@ enum Role {
   PATIENT
   DOCTOR
   CLINIC_ADMIN
-  SUPER_ADMIN
+  SUPERADMIN
 }
 
 enum AppointmentStatus {
@@ -77,13 +77,17 @@ model Clinic {
   phone              String?
   
   // Pagos y Suscripciones
-  stripeAccountId    String?
+  kushkiCardToken    String?
   subscriptionStatus SubscriptionStatus @default(INACTIVE)
   
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
+  // Enlace con el sistema de autenticación (User)
+  userId             String?            @unique
+
   // Relaciones
+  affiliatedDoctors  Doctor[]
   doctors            DoctorLocation[]
   appointments       Appointment[]
   specialties        Specialty[]        
@@ -100,7 +104,7 @@ model Doctor {
   consultationPrice       Float
   
   // Pagos y Suscripciones
-  stripeAccountId         String?
+  walletBalance           Float              @default(0)
   subscriptionStatus      SubscriptionStatus @default(INACTIVE)
   subscriptionValidUntil  DateTime?
   paidBy                  PayerType          @default(SELF)
@@ -108,7 +112,12 @@ model Doctor {
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
 
+  // Enlace con el sistema de autenticación (User)
+  userId                  String?            @unique
+
   // Relaciones
+  clinicId                String?
+  clinic                  Clinic?            @relation(fields: [clinicId], references: [id])
   locations               DoctorLocation[]
   appointments            Appointment[]
   reviews                 Review[]
@@ -117,6 +126,7 @@ model Doctor {
 
   @@index([isVerified])
   @@index([subscriptionStatus])
+  @@index([clinicId])
 }
 
 model DoctorLocation {
@@ -180,7 +190,7 @@ model Appointment {
   
   // Pagos
   paymentStatus       PaymentStatus     @default(PENDING)
-  stripeTransactionId String?           @unique
+  paymentId           String?           @unique
   commissionAmount    Float?
 
   createdAt           DateTime          @default(now())
