@@ -1,10 +1,40 @@
 import { Router } from 'express';
-import { getClinics, getClinicById, createClinic } from '../controllers/clinic.controller';
+import { 
+  getClinics, 
+  getClinicById, 
+  createClinic,
+  addDoctorToClinic,
+  removeDoctorFromClinic,
+  getClinicDoctors
+} from '../controllers/clinic.controller';
+import { authenticate, requireRole } from '../middlewares/auth.middleware';
 
 const router = Router();
 
+// Rutas básicas existentes
 router.get('/', getClinics);
 router.get('/:id', getClinicById);
 router.post('/', createClinic);
+
+// --- Rutas de Médico Híbrido ---
+
+// Listar doctores de una clínica específica (Pública para que los pacientes puedan ver el directorio)
+router.get('/:clinicProfileId/doctors', getClinicDoctors);
+
+// Añadir un doctor a la clínica (Protegido: solo administradores)
+router.post(
+  '/:clinicProfileId/doctors',
+  authenticate,
+  requireRole(['CLINIC_ADMIN', 'SUPER_ADMIN']),
+  addDoctorToClinic
+);
+
+// Dar de baja a un doctor de la clínica (Protegido: solo administradores)
+router.delete(
+  '/:clinicProfileId/doctors/:doctorProfileId',
+  authenticate,
+  requireRole(['CLINIC_ADMIN', 'SUPER_ADMIN']),
+  removeDoctorFromClinic
+);
 
 export default router;

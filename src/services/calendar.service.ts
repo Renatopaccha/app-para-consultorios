@@ -23,7 +23,7 @@ const getOAuth2Client = (accessToken: string, refreshToken: string) => {
  * @param timeMax Fecha de fin (ISO String)
  */
 export const getDoctorAvailability = async (doctorId: string, timeMin: string, timeMax: string) => {
-  const doctor = await prisma.doctor.findUnique({ where: { id: doctorId } });
+  const doctor = await prisma.doctorProfile.findUnique({ where: { id: doctorId } });
   
   if (!doctor || !doctor.googleRefreshToken) {
     throw new Error('El doctor no tiene sincronizado su Google Calendar');
@@ -53,7 +53,7 @@ export const getDoctorAvailability = async (doctorId: string, timeMin: string, t
  * @param endTime Fecha y hora de fin de la cita (ISO String)
  */
 export const blockVitaliTimeSlot = async (doctorId: string, startTime: string, endTime: string) => {
-  const doctor = await prisma.doctor.findUnique({ where: { id: doctorId } });
+  const doctor = await prisma.doctorProfile.findUnique({ where: { id: doctorId } });
   
   if (!doctor || !doctor.googleRefreshToken) {
     throw new Error('El doctor no tiene sincronizado su Google Calendar');

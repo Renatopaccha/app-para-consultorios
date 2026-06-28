@@ -1,14 +1,15 @@
 import nodemailer from 'nodemailer';
-import * as admin from 'firebase-admin';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 
 // 1. Configuración de Firebase Admin usando archivo local JSON
-if (!admin.apps.length) {
+if (!getApps().length) {
   try {
     // Intentamos cargar las credenciales desde el archivo local
     const serviceAccount = require('../config/firebase-admin.json');
     
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
+    initializeApp({
+      credential: cert(serviceAccount)
     });
     console.log('[NotificationService] Firebase Admin inicializado correctamente con firebase-admin.json');
   } catch (error: any) {
@@ -72,7 +73,7 @@ export const notificationService = {
         token: fcmToken,
       };
 
-      const response = await admin.messaging().send(message);
+      const response = await getMessaging().send(message);
       console.log(`[NotificationService] Push enviado exitosamente. MessageId: ${response}`);
       return true;
     } catch (error) {

@@ -10,7 +10,7 @@ export const getDoctorDashboard = async (req: AuthRequest, res: Response) => {
     }
 
     // Buscamos el perfil de doctor asociado a este usuario
-    const doctor = await prisma.doctor.findUnique({
+    const doctor = await prisma.doctorProfile.findUnique({
       where: { userId } // Requiere que el esquema tenga userId @unique
     });
 
@@ -28,7 +28,7 @@ export const getDoctorDashboard = async (req: AuthRequest, res: Response) => {
     // Contamos las citas del doctor programadas para el día de hoy
     const appointmentsToday = await prisma.appointment.count({
       where: {
-        doctorId: doctor.id,
+        doctorProfileId: doctor.id,
         date: {
           gte: today,
           lt: tomorrow
@@ -54,14 +54,18 @@ export const getClinicDashboard = async (req: AuthRequest, res: Response) => {
     }
 
     // Buscamos el perfil de la clínica asociada a este usuario
-    const clinic = await prisma.clinic.findUnique({
+    const clinic = await prisma.clinicProfile.findUnique({
       where: { userId }, // Requiere que el esquema tenga userId @unique
       include: {
         affiliatedDoctors: {
-          select: {
-            id: true,
-            licenseNumber: true,
-            isVerified: true
+          include: {
+            doctorProfile: {
+              select: {
+                id: true,
+                licenseNumber: true,
+                isVerified: true
+              }
+            }
           }
         }
       }

@@ -37,7 +37,13 @@ export const createReview = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Faltan campos requeridos (appointmentId, patientId, doctorId, rating)' });
     }
 
-    const review = await prisma.review.create({ data: req.body });
+    const { doctorId: _, ...restBody } = req.body;
+    const review = await prisma.review.create({ 
+      data: {
+        ...restBody,
+        doctorProfileId: doctorId
+      }
+    });
     res.status(201).json(review);
   } catch (error) {
     res.status(500).json({ error: 'Error al crear reseña' });

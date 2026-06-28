@@ -13,7 +13,7 @@ export const getActiveDoctors = async (req: AuthRequest, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 20;
     const skip = (page - 1) * limit;
 
-    const doctors = await prisma.doctor.findMany({
+    const doctors = await prisma.doctorProfile.findMany({
       where: {
         isVerified: true, // Asumimos que los activos son los verificados
       },
@@ -24,11 +24,15 @@ export const getActiveDoctors = async (req: AuthRequest, res: Response) => {
         licenseNumber: true,
         isVerified: true,
         consultationPrice: true,
-        clinic: {
-          select: {
-            id: true,
-            name: true,
-            address: true,
+        workplaces: {
+          include: {
+            clinicProfile: {
+              select: {
+                id: true,
+                name: true,
+                address: true,
+              }
+            }
           }
         }
       }
@@ -61,11 +65,11 @@ export const scheduleAppointment = async (req: AuthRequest, res: Response) => {
     const appointmentDate = new Date(date);
 
     // 1. Verificamos que el doctor y la clínica realmente existen
-    const doctorExists = await prisma.doctor.findUnique({ 
+    const doctorExists = await prisma.doctorProfile.findUnique({ 
       where: { id: doctorId },
       include: { user: true } // Traemos el user para obtener su email
     });
-    const clinicExists = await prisma.clinic.findUnique({ where: { id: clinicId } });
+    const clinicExists = await prisma.clinicProfile.findUnique({ where: { id: clinicId } });
 
     if (!doctorExists || !clinicExists) {
       return res.status(404).json({ error: 'El doctor o la clínica especificada no existen.' });
@@ -74,8 +78,8 @@ export const scheduleAppointment = async (req: AuthRequest, res: Response) => {
     const appointment = await prisma.appointment.create({
       data: {
         patientId, // <-- CRÍTICO: ID blindado extraído del Token JWT, imposible de inyectar por Body
-        doctorId,
-        clinicId,
+        doctorProfileId: doctorId,
+        clinicProfileId: clinicId,
         date: appointmentDate,
         time,
         status: 'PENDING'
@@ -135,14 +139,14 @@ export const getMyAppointments = async (req: AuthRequest, res: Response) => {
         date: 'desc'
       },
       include: {
-        doctor: {
+        doctorProfile: {
           select: {
             id: true,
             licenseNumber: true,
             consultationPrice: true,
           }
         },
-        clinic: {
+        clinicProfile: {
           select: {
             id: true,
             name: true,

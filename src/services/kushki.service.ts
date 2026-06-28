@@ -54,7 +54,7 @@ export class KushkiService {
         });
 
         // Sumar al saldo del doctor
-        await tx.doctor.update({
+        await tx.doctorProfile.update({
           where: { id: doctorId },
           data: {
             walletBalance: {
@@ -79,7 +79,7 @@ export class KushkiService {
    */
   static async chargeClinicSubscription(clinicId: string, amount: number) {
     try {
-      const clinic = await prisma.clinic.findUnique({
+      const clinic = await prisma.clinicProfile.findUnique({
         where: { id: clinicId },
         select: { kushkiCardToken: true }
       });

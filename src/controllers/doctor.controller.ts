@@ -22,6 +22,7 @@ export const getDoctors = async (req: Request, res: Response) => {
           }
         },
         workplaces: {
+          where: { isActive: true },
           include: {
             clinicProfile: {
               select: {
@@ -31,7 +32,8 @@ export const getDoctors = async (req: Request, res: Response) => {
               }
             }
           }
-        }
+        },
+        specialties: true
       }
     });
     res.json(doctors);
@@ -57,6 +59,7 @@ export const getDoctorById = async (req: Request, res: Response) => {
           }
         },
         workplaces: {
+          where: { isActive: true },
           include: {
             clinicProfile: {
               select: {
@@ -66,7 +69,8 @@ export const getDoctorById = async (req: Request, res: Response) => {
               }
             }
           }
-        }
+        },
+        specialties: true
       }
     });
     if (!doctor) {

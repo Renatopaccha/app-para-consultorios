@@ -1,12 +1,13 @@
 import { Router } from 'express';
-// Fíjate que aquí agregué "registerDoctor" a la lista de importaciones
-import { registerPatient, registerClinic, registerDoctor, login } from '../controllers/auth.controller';
+// Importamos la función unificada de registro y el login
+import { register, login } from '../controllers/auth.controller';
 
 const router = Router();
 
-router.post('/register-patient', registerPatient);
-router.post('/register/clinic', registerClinic);
-router.post('/register/doctor', registerDoctor); // <-- Aquí está la nueva ruta
+// Una sola puerta de entrada inteligente para todos los roles
+router.post('/register', register);
+
+// La puerta de inicio de sesión
 router.post('/login', login);
 
 export default router;

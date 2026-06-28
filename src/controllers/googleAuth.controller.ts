@@ -49,7 +49,7 @@ export const handleGoogleCallback = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ error: 'Usuario no autenticado' });
     }
 
-    const doctor = await prisma.doctor.findUnique({
+    const doctor = await prisma.doctorProfile.findUnique({
       where: { userId }
     });
 
@@ -62,7 +62,7 @@ export const handleGoogleCallback = async (req: AuthRequest, res: Response) => {
     const { tokens } = await oauth2Client.getToken(code);
 
     // Guardamos los tokens de forma segura en el registro del Doctor
-    await prisma.doctor.update({
+    await prisma.doctorProfile.update({
       where: { id: doctor.id },
       data: {
         googleAccessToken: tokens.access_token,

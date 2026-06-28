@@ -32,16 +32,18 @@ cron.schedule('* * * * *', async () => {
       },
       include: {
         patient: true,
-        doctor: {
+        doctorProfile: {
           include: { user: true }
         },
-        clinic: true
+        clinicProfile: true
       }
     });
 
     for (const appointment of upcomingAppointments) {
       // Reconstruimos la fecha/hora exacta de la cita
-      const [hours, minutes] = appointment.time.split(':').map(Number);
+      const [hoursStr, minutesStr] = appointment.time.split(':');
+      const hours = Number(hoursStr) || 0;
+      const minutes = Number(minutesStr) || 0;
       const exactAppointmentDate = new Date(appointment.date);
       exactAppointmentDate.setHours(hours, minutes, 0, 0);
 
@@ -58,19 +60,19 @@ cron.schedule('* * * * *', async () => {
       // Ventana de tolerancia: ~3 minutos (para evitar omitir por micro-retrasos en cron, pero asegurando no mandar doble)
       if (!appointment.reminder24hSent && hoursUntilAppointment <= 24.05 && hoursUntilAppointment >= 23.95) {
         reminderTitle = 'Recordatorio: Tu cita es mañana';
-        reminderBody = `Recuerda que tienes una cita en ${appointment.clinic.name} con el Dr(a). ${appointment.doctor.user?.lastName} mañana a las ${appointment.time}.`;
+        reminderBody = `Recuerda que tienes una cita en ${appointment.clinicProfile.name} con el Dr(a). ${appointment.doctorProfile.user?.lastName} mañana a las ${appointment.time}.`;
         updates.reminder24hSent = true;
         shouldUpdate = true;
       } 
       else if (!appointment.reminder2hSent && hoursUntilAppointment <= 2.05 && hoursUntilAppointment >= 1.95) {
         reminderTitle = 'Recordatorio: Tu cita es en 2 horas';
-        reminderBody = `Tu cita en ${appointment.clinic.name} comienza en 2 horas. Por favor llega con anticipación.`;
+        reminderBody = `Tu cita en ${appointment.clinicProfile.name} comienza en 2 horas. Por favor llega con anticipación.`;
         updates.reminder2hSent = true;
         shouldUpdate = true;
       } 
       else if (!appointment.reminder1hSent && hoursUntilAppointment <= 1.05 && hoursUntilAppointment >= 0.95) {
         reminderTitle = '¡Tu cita es en 1 hora!';
-        reminderBody = `Prepárate, tu cita con el Dr(a). ${appointment.doctor.user?.lastName} empieza en 1 hora.`;
+        reminderBody = `Prepárate, tu cita con el Dr(a). ${appointment.doctorProfile.user?.lastName} empieza en 1 hora.`;
         updates.reminder1hSent = true;
         shouldUpdate = true;
       }
