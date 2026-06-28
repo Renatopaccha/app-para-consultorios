@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../utils/jwt';
-export type Role = 'PATIENT' | 'DOCTOR' | 'CLINIC_ADMIN' | 'SUPERADMIN';
+export type Role = 'SUPER_ADMIN' | 'CLINIC_ADMIN' | 'DOCTOR' | 'ASSISTANT' | 'PATIENT';
 
 export interface AuthRequest extends Request {
   user?: {

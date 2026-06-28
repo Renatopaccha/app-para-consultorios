@@ -52,7 +52,6 @@ export const registerClinic = async (req: Request, res: Response) => {
 
     const passwordHash = await bcrypt.hash(password, 10);
 
-    // Usamos una transacción de Prisma para garantizar atomicidad
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
@@ -62,23 +61,24 @@ export const registerClinic = async (req: Request, res: Response) => {
           lastName,
           phone,
           role: 'CLINIC_ADMIN',
+          clinicProfile: {
+            create: {
+              name,
+              address,
+            }
+          }
         },
+        include: {
+          clinicProfile: true,
+        }
       });
-
-      const clinic = await tx.clinic.create({
-        data: {
-          name,
-          address,
-        },
-      });
-
-      return { user, clinic };
+      return user;
     });
 
-    const token = generateToken({ id: result.user.id, role: result.user.role });
-    const { passwordHash: _, ...userWithoutPassword } = result.user;
+    const token = generateToken({ id: result.id, role: result.role });
+    const { passwordHash: _, clinicProfile, ...userWithoutPassword } = result;
 
-    res.status(201).json({ user: userWithoutPassword, clinic: result.clinic, token });
+    res.status(201).json({ user: userWithoutPassword, clinicProfile, token });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error al registrar la clínica' });
@@ -113,7 +113,7 @@ export const login = async (req: Request, res: Response) => {
 
 export const registerDoctor = async (req: Request, res: Response) => {
   try {
-    const { email, password, firstName, lastName, phone, licenseNumber, consultationPrice, clinicId } = req.body;
+    const { email, password, firstName, lastName, phone, licenseNumber, consultationPrice, clinicProfileId } = req.body;
 
     // Ya no exigimos licenseNumber ni consultationPrice, pero sí los campos básicos
     if (!email || !password || !firstName || !lastName) {
@@ -136,27 +136,33 @@ export const registerDoctor = async (req: Request, res: Response) => {
           lastName,
           phone,
           role: 'DOCTOR',
+          doctorProfile: {
+            create: {
+              licenseNumber: licenseNumber || `TEMP-${Date.now()}`,
+              consultationPrice: consultationPrice ? Number(consultationPrice) : 0,
+              ...(clinicProfileId ? {
+                workplaces: {
+                  create: [
+                    { clinicProfileId: clinicProfileId }
+                  ]
+                }
+              } : {})
+            }
+          }
         },
+        include: {
+          doctorProfile: {
+            include: { workplaces: true }
+          }
+        }
       });
-
-      const doctor = await tx.doctor.create({
-        data: {
-          // Si no envía número de licencia, generamos uno temporal
-          licenseNumber: licenseNumber || `TEMP-${Date.now()}`,
-          // Si no envía precio, por defecto es 0
-          consultationPrice: consultationPrice ? Number(consultationPrice) : 0,
-          userId: user.id,
-          clinicId: clinicId || null
-        },
-      });
-
-      return { user, doctor };
+      return user;
     });
 
-    const token = generateToken({ id: result.user.id, role: result.user.role });
-    const { passwordHash: _, ...userWithoutPassword } = result.user;
+    const token = generateToken({ id: result.id, role: result.role });
+    const { passwordHash: _, doctorProfile, ...userWithoutPassword } = result;
 
-    res.status(201).json({ user: userWithoutPassword, doctor: result.doctor, token });
+    res.status(201).json({ user: userWithoutPassword, doctorProfile, token });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error al registrar el doctor' });

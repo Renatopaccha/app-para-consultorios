@@ -8,10 +8,11 @@ datasource db {
 }
 
 enum Role {
-  PATIENT
-  DOCTOR
+  SUPER_ADMIN
   CLINIC_ADMIN
-  SUPERADMIN
+  DOCTOR
+  ASSISTANT
+  PATIENT
 }
 
 enum AppointmentStatus {
@@ -38,6 +39,10 @@ enum PayerType {
   CLINIC
 }
 
+// ---------------------------------------------------------------------------
+// 1. MODELO CENTRAL: USER Y SEGURIDAD
+// ---------------------------------------------------------------------------
+
 model User {
   id                     String    @id @default(uuid())
   firstName              String
@@ -46,36 +51,61 @@ model User {
   phone                  String?
   role                   Role      @default(PATIENT)
   
-  // Auth & Notificaciones
+  // Auth & SSO
   passwordHash           String?
   provider               String?   // "google", "apple", "local"
+  googleId               String?   @unique
   fcmToken               String?   // Firebase FCM Token
   
-  // Seguridad
+  // Seguridad (Fase 2)
   resetPasswordToken     String?   @unique
   resetPasswordExpires   DateTime?
   twoFactorCode          String?
-  twoFactorCodeExpires   DateTime?
+  twoFactorExpires       DateTime?
+  is2FAEnabled           Boolean   @default(false)
 
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
+  // Perfiles Especializados (Relaciones 1 a 1)
+  doctorProfile          DoctorProfile?
+  clinicProfile          ClinicProfile?
+  assistantProfile       AssistantProfile?
+
   // Relaciones
   appointmentsAsPatient  Appointment[] @relation("PatientAppointments")
   reviewsGiven           Review[]      @relation("PatientReviews")
+  securityLogs           SecurityLog[]
   
   @@index([email])
   @@index([resetPasswordToken])
   @@index([role])
 }
 
-model Clinic {
+model SecurityLog {
+  id          String   @id @default(uuid())
+  userId      String
+  ipAddress   String
+  userAgent   String
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// 2. MODELOS DE PERFIL ESPECIALIZADOS
+// ---------------------------------------------------------------------------
+
+model ClinicProfile {
   id                 String             @id @default(uuid())
+  userId             String             @unique
   name               String
   address            String
+  phone              String?
   latitude           Float?
   longitude          Float?
-  phone              String?
   
   // Pagos y Suscripciones
   kushkiCardToken    String?
@@ -84,24 +114,25 @@ model Clinic {
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
-  // Enlace con el sistema de autenticación (User)
-  userId             String?            @unique
-
   // Relaciones
-  affiliatedDoctors  Doctor[]
-  doctors            DoctorLocation[]
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  affiliatedDoctors  DoctorClinicWorkplace[]
   appointments       Appointment[]
   specialties        Specialty[]        
-  insurances         Insurance[]        
+  insurances         Insurance[]
+  assistants         AssistantProfile[]
 
   @@index([latitude, longitude])
   @@index([subscriptionStatus])
 }
 
-model Doctor {
+model DoctorProfile {
   id                      String             @id @default(uuid())
+  userId                  String             @unique
   licenseNumber           String             @unique
   isVerified              Boolean            @default(false)
+  isIndependent           Boolean            @default(false)
+  biography               String?
   consultationPrice       Float
   
   // Pagos y Suscripciones
@@ -118,42 +149,67 @@ model Doctor {
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
 
-  // Enlace con el sistema de autenticación (User)
-  userId                  String?            @unique
-
   // Relaciones
-  clinicId                String?
-  clinic                  Clinic?            @relation(fields: [clinicId], references: [id])
-  locations               DoctorLocation[]
+  user                    User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workplaces              DoctorClinicWorkplace[]
   appointments            Appointment[]
   reviews                 Review[]
   specialties             Specialty[]        
-  insurances              Insurance[]        
+  insurances              Insurance[]
+  assistants              AssistantProfile[]
 
   @@index([isVerified])
   @@index([subscriptionStatus])
-  @@index([clinicId])
 }
 
-model DoctorLocation {
-  id         String    @id @default(uuid())
-  doctorId   String
-  clinicId   String
-  isActive   Boolean   @default(true)
-  joinedAt   DateTime  @default(now())
-  leftAt     DateTime?
+model AssistantProfile {
+  id               String   @id @default(uuid())
+  userId           String   @unique
+  canViewFinances  Boolean  @default(false)
 
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  // A quién asiste (Relaciones opcionales)
+  doctorProfileId  String?
+  clinicProfileId  String?
 
-  doctor     Doctor    @relation(fields: [doctorId], references: [id], onDelete: Cascade)
-  clinic     Clinic    @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  @@unique([doctorId, clinicId])
-  @@index([doctorId])
-  @@index([clinicId])
+  // Relaciones
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  doctorProfile    DoctorProfile? @relation(fields: [doctorProfileId], references: [id])
+  clinicProfile    ClinicProfile? @relation(fields: [clinicProfileId], references: [id])
+
+  @@index([doctorProfileId])
+  @@index([clinicProfileId])
+}
+
+// ---------------------------------------------------------------------------
+// 3. TABLA INTERMEDIA (EL MÉDICO HÍBRIDO)
+// ---------------------------------------------------------------------------
+
+model DoctorClinicWorkplace {
+  id               String   @id @default(uuid())
+  doctorProfileId  String
+  clinicProfileId  String
+  isActive         Boolean  @default(true)
+  joinedAt         DateTime @default(now())
+  leftAt           DateTime?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  doctorProfile    DoctorProfile @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
+  clinicProfile    ClinicProfile @relation(fields: [clinicProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorProfileId, clinicProfileId])
+  @@index([doctorProfileId])
+  @@index([clinicProfileId])
   @@index([isActive])
 }
+
+// ---------------------------------------------------------------------------
+// 4. ENTIDADES DEL NEGOCIO (CITAS, RESEÑAS Y CATÁLOGOS)
+// ---------------------------------------------------------------------------
 
 model Specialty {
   id          String   @id @default(uuid())
@@ -164,8 +220,8 @@ model Specialty {
   updatedAt   DateTime @updatedAt
 
   // Relaciones
-  doctors     Doctor[]
-  clinics     Clinic[]
+  doctorProfiles   DoctorProfile[]
+  clinicProfiles   ClinicProfile[]
 
   @@index([name])
 }
@@ -178,8 +234,8 @@ model Insurance {
   updatedAt   DateTime @updatedAt
 
   // Relaciones
-  doctors     Doctor[]
-  clinics     Clinic[]
+  doctorProfiles   DoctorProfile[]
+  clinicProfiles   ClinicProfile[]
 
   @@index([name])
 }
@@ -187,8 +243,8 @@ model Insurance {
 model Appointment {
   id                  String            @id @default(uuid())
   patientId           String
-  doctorId            String
-  clinicId            String
+  doctorProfileId     String
+  clinicProfileId     String
   
   date                DateTime
   time                String            
@@ -209,33 +265,33 @@ model Appointment {
 
   // Relaciones
   patient             User              @relation("PatientAppointments", fields: [patientId], references: [id])
-  doctor              Doctor            @relation(fields: [doctorId], references: [id])
-  clinic              Clinic            @relation(fields: [clinicId], references: [id])
+  doctorProfile       DoctorProfile     @relation(fields: [doctorProfileId], references: [id])
+  clinicProfile       ClinicProfile     @relation(fields: [clinicProfileId], references: [id])
   review              Review?           
 
   @@index([patientId])
-  @@index([doctorId])
-  @@index([clinicId])
+  @@index([doctorProfileId])
+  @@index([clinicProfileId])
   @@index([date])
   @@index([status])
 }
 
 model Review {
-  id            String   @id @default(uuid())
-  appointmentId String   @unique
-  patientId     String
-  doctorId      String
+  id                String   @id @default(uuid())
+  appointmentId     String   @unique
+  patientId         String
+  doctorProfileId   String
   
-  rating        Int      
-  comment       String?
+  rating            Int      
+  comment           String?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  appointment   Appointment @relation(fields: [appointmentId], references: [id])
-  patient       User        @relation("PatientReviews", fields: [patientId], references: [id])
-  doctor        Doctor      @relation(fields: [doctorId], references: [id])
+  appointment       Appointment   @relation(fields: [appointmentId], references: [id])
+  patient           User          @relation("PatientReviews", fields: [patientId], references: [id])
+  doctorProfile     DoctorProfile @relation(fields: [doctorProfileId], references: [id])
 
-  @@index([doctorId])
+  @@index([doctorProfileId])
   @@index([patientId])
 }

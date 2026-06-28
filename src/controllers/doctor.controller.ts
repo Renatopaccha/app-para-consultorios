@@ -8,23 +8,35 @@ export const getDoctors = async (req: Request, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 10;
     const skip = (page - 1) * limit;
 
-    const doctors = await prisma.doctor.findMany({
+    const doctors = await prisma.doctorProfile.findMany({
       skip,
       take: limit,
-      select: {
-        id: true,
-        licenseNumber: true,
-        isVerified: true,
-        consultationPrice: true,
-        subscriptionStatus: true,
-        subscriptionValidUntil: true,
-        paidBy: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true
+          }
+        },
+        workplaces: {
+          include: {
+            clinicProfile: {
+              select: {
+                id: true,
+                name: true,
+                address: true
+              }
+            }
+          }
+        }
+      }
     });
     res.json(doctors);
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: 'Error al obtener doctores' });
   }
 };
@@ -32,53 +44,64 @@ export const getDoctors = async (req: Request, res: Response) => {
 export const getDoctorById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const doctor = await prisma.doctor.findUnique({ 
+    const doctor = await prisma.doctorProfile.findUnique({ 
       where: { id: id as string },
-      select: {
-        id: true,
-        licenseNumber: true,
-        isVerified: true,
-        consultationPrice: true,
-        subscriptionStatus: true,
-        subscriptionValidUntil: true,
-        paidBy: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phone: true
+          }
+        },
+        workplaces: {
+          include: {
+            clinicProfile: {
+              select: {
+                id: true,
+                name: true,
+                address: true
+              }
+            }
+          }
+        }
+      }
     });
     if (!doctor) {
       return res.status(404).json({ error: 'Doctor no encontrado' });
     }
     res.json(doctor);
   } catch (error) {
+    console.error(error);
     res.status(500).json({ error: 'Error al obtener doctor' });
   }
 };
 
 export const createDoctor = async (req: Request, res: Response) => {
   try {
-    const { licenseNumber, consultationPrice } = req.body;
-    if (!licenseNumber || consultationPrice === undefined) {
-      return res.status(400).json({ error: 'Faltan campos requeridos (licenseNumber, consultationPrice)' });
+    const { licenseNumber, consultationPrice, userId } = req.body;
+    if (!licenseNumber || consultationPrice === undefined || !userId) {
+      return res.status(400).json({ error: 'Faltan campos requeridos (licenseNumber, consultationPrice, userId)' });
     }
 
-    const doctor = await prisma.doctor.create({ 
+    const doctor = await prisma.doctorProfile.create({ 
       data: req.body,
-      select: {
-        id: true,
-        licenseNumber: true,
-        isVerified: true,
-        consultationPrice: true,
-        subscriptionStatus: true,
-        subscriptionValidUntil: true,
-        paidBy: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      include: {
+        user: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true
+          }
+        }
+      }
     });
     res.status(201).json(doctor);
   } catch (error) {
-    res.status(500).json({ error: 'Error al crear doctor' });
+    console.error(error);
+    res.status(500).json({ error: 'Error al crear perfil de doctor' });
   }
 };
 
@@ -90,7 +113,7 @@ export const getMyAppointments = async (req: AuthRequest, res: Response) => {
     }
 
     // Buscamos el perfil del doctor asociado a este usuario
-    const doctor = await prisma.doctor.findUnique({
+    const doctor = await prisma.doctorProfile.findUnique({
       where: { userId }
     });
 
@@ -104,7 +127,7 @@ export const getMyAppointments = async (req: AuthRequest, res: Response) => {
 
     const appointments = await prisma.appointment.findMany({
       where: {
-        doctorId: doctor.id
+        doctorProfileId: doctor.id
       },
       skip,
       take: limit,
@@ -121,7 +144,7 @@ export const getMyAppointments = async (req: AuthRequest, res: Response) => {
             phone: true
           }
         },
-        clinic: {
+        clinicProfile: {
           select: {
             id: true,
             name: true,
