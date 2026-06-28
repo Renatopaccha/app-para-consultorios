@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
+import { notificationService } from '../services/notification.service';
 
 /**
  * 1. GET /api/patients/doctors (Buscador)
@@ -60,7 +61,10 @@ export const scheduleAppointment = async (req: AuthRequest, res: Response) => {
     const appointmentDate = new Date(date);
 
     // 1. Verificamos que el doctor y la clínica realmente existen
-    const doctorExists = await prisma.doctor.findUnique({ where: { id: doctorId } });
+    const doctorExists = await prisma.doctor.findUnique({ 
+      where: { id: doctorId },
+      include: { user: true } // Traemos el user para obtener su email
+    });
     const clinicExists = await prisma.clinic.findUnique({ where: { id: clinicId } });
 
     if (!doctorExists || !clinicExists) {
@@ -77,6 +81,18 @@ export const scheduleAppointment = async (req: AuthRequest, res: Response) => {
         status: 'PENDING'
       }
     });
+
+    // Enviar notificación al doctor
+    if (doctorExists.user && doctorExists.user.email) {
+      const emailHtml = `
+        <h3>¡Nueva cita agendada en Vitali!</h3>
+        <p>Doctor(a) ${doctorExists.user.firstName} ${doctorExists.user.lastName},</p>
+        <p>Se ha reservado un espacio en su agenda para la fecha <strong>${date}</strong> a las <strong>${time}</strong>.</p>
+        <p>Revise su panel médico para más detalles.</p>
+      `;
+      // Llamada asíncrona "fire and forget"
+      notificationService.sendEmail(doctorExists.user.email, 'Nueva Cita Vitali', emailHtml).catch(console.error);
+    }
 
     res.status(201).json(appointment);
   } catch (error: any) {
@@ -141,5 +157,35 @@ export const getMyAppointments = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('[Patient Controller] Error en getMyAppointments:', error);
     res.status(500).json({ error: 'Error al obtener tu historial de citas' });
+  }
+};
+
+/**
+ * 4. POST /api/patients/fcm-token
+ * Guarda o actualiza el FCM Token del paciente para Push Notifications.
+ */
+export const updateFcmToken = async (req: AuthRequest, res: Response) => {
+  try {
+    const patientId = req.user?.id;
+    if (!patientId) {
+      return res.status(401).json({ error: 'No autorizado' });
+    }
+
+    const { fcmToken } = req.body;
+
+    if (!fcmToken) {
+      return res.status(400).json({ error: 'Falta el campo fcmToken' });
+    }
+
+    // Actualizamos el token en el modelo User del paciente
+    await prisma.user.update({
+      where: { id: patientId },
+      data: { fcmToken }
+    });
+
+    res.json({ message: 'FCM Token guardado exitosamente' });
+  } catch (error) {
+    console.error('[Patient Controller] Error en updateFcmToken:', error);
+    res.status(500).json({ error: 'Error al guardar el token de notificaciones' });
   }
 };

@@ -9,6 +9,10 @@ import doctorRoutes from './routes/doctor.routes';
 import reviewRoutes from './routes/review.routes';
 import appointmentRoutes from './routes/appointment.routes';
 import patientRoutes from './routes/patient.routes';
+import googleAuthRoutes from './routes/googleAuth.routes';
+
+// Tareas programadas (Cron Jobs)
+import './jobs/reminder.job';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -32,5 +36,6 @@ app.use('/api/doctors', doctorRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/patients', patientRoutes);
+app.use('/api/google', googleAuthRoutes);
 
 export default app;

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getActiveDoctors, scheduleAppointment, getMyAppointments } from '../controllers/patient.controller';
+import { getActiveDoctors, scheduleAppointment, getMyAppointments, updateFcmToken } from '../controllers/patient.controller';
 import { authenticate, requireRole } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -17,5 +17,8 @@ router.get('/my-appointments', getMyAppointments);
 
 // 3. Agendar una cita
 router.post('/appointments', scheduleAppointment);
+
+// 4. Guardar token de dispositivo (Push Notifications)
+router.post('/fcm-token', updateFcmToken);
 
 export default router;

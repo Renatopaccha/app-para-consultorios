@@ -1,0 +1,83 @@
+import nodemailer from 'nodemailer';
+import * as admin from 'firebase-admin';
+
+// 1. Configuración de Firebase Admin usando archivo local JSON
+if (!admin.apps.length) {
+  try {
+    // Intentamos cargar las credenciales desde el archivo local
+    const serviceAccount = require('../config/firebase-admin.json');
+    
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log('[NotificationService] Firebase Admin inicializado correctamente con firebase-admin.json');
+  } catch (error: any) {
+    if (error.code === 'MODULE_NOT_FOUND') {
+      console.warn('[NotificationService] ADVERTENCIA: El archivo src/config/firebase-admin.json no fue encontrado. Las notificaciones Push no funcionarán.');
+    } else {
+      console.error('[NotificationService] Error inicializando Firebase Admin:', error);
+    }
+  }
+}
+
+// 2. Configuración de Nodemailer (SMTP)
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT) || 587,
+  secure: process.env.SMTP_SECURE === 'true', // true para 465, false para otros puertos
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
+export const notificationService = {
+  /**
+   * Envía un correo electrónico.
+   * @param to Destinatario
+   * @param subject Asunto del correo
+   * @param html Contenido HTML
+   */
+  async sendEmail(to: string, subject: string, html: string) {
+    try {
+      const info = await transporter.sendMail({
+        from: `"Vitali 🏥" <${process.env.SMTP_USER}>`,
+        to,
+        subject,
+        html,
+      });
+      console.log(`[NotificationService] Email enviado exitosamente a ${to}. MessageId: ${info.messageId}`);
+      return true;
+    } catch (error) {
+      console.error(`[NotificationService] Error enviando email a ${to}:`, error);
+      return false; // Evitamos romper el flujo principal si el correo falla
+    }
+  },
+
+  /**
+   * Envía una notificación Push a través de Firebase Cloud Messaging (FCM).
+   * @param fcmToken El token del dispositivo (FCM Token) guardado en la tabla User
+   * @param title Título de la notificación
+   * @param body Cuerpo o mensaje de la notificación
+   */
+  async sendPushNotification(fcmToken: string, title: string, body: string) {
+    if (!fcmToken) return false;
+
+    try {
+      const message = {
+        notification: {
+          title,
+          body,
+        },
+        token: fcmToken,
+      };
+
+      const response = await admin.messaging().send(message);
+      console.log(`[NotificationService] Push enviado exitosamente. MessageId: ${response}`);
+      return true;
+    } catch (error) {
+      console.error('[NotificationService] Error enviando push:', error);
+      return false; // Evitamos romper el flujo principal
+    }
+  }
+};

@@ -46,9 +46,10 @@ model User {
   phone                  String?
   role                   Role      @default(PATIENT)
   
-  // Auth
+  // Auth & Notificaciones
   passwordHash           String?
   provider               String?   // "google", "apple", "local"
+  fcmToken               String?   // Firebase FCM Token
   
   // Seguridad
   resetPasswordToken     String?   @unique
@@ -108,6 +109,11 @@ model Doctor {
   subscriptionStatus      SubscriptionStatus @default(INACTIVE)
   subscriptionValidUntil  DateTime?
   paidBy                  PayerType          @default(SELF)
+
+  // Integración Google Calendar
+  googleRefreshToken      String?
+  googleAccessToken       String?
+  tokenExpiry             DateTime?
 
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
@@ -192,6 +198,11 @@ model Appointment {
   paymentStatus       PaymentStatus     @default(PENDING)
   paymentId           String?           @unique
   commissionAmount    Float?
+
+  // Recordatorios
+  reminder24hSent     Boolean           @default(false)
+  reminder2hSent      Boolean           @default(false)
+  reminder1hSent      Boolean           @default(false)
 
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
