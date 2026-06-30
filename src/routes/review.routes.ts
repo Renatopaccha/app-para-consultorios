@@ -1,10 +1,13 @@
 import { Router } from 'express';
-import { getReviews, getReviewById, createReview } from '../controllers/review.controller';
+import { createReview, getDoctorReviews } from '../controllers/review.controller';
+import { authenticate, requireRole } from '../middlewares/auth.middleware';
 
 const router = Router();
 
-router.get('/', getReviews);
-router.get('/:id', getReviewById);
-router.post('/', createReview);
+// Crear reseña - Solo accesible por pacientes
+router.post('/', authenticate, requireRole(['PATIENT']), createReview);
+
+// Ver reseñas de un doctor - Pública para mostrarse en el perfil del médico
+router.get('/doctor/:doctorId', getDoctorReviews);
 
 export default router;

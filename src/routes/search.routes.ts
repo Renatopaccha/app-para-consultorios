@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { searchDoctors } from '../controllers/search.controller';
+import { searchDoctorsAndClinics } from '../controllers/search.controller';
 
 const router = Router();
 
-// Búsqueda pública de médicos
-router.get('/doctors', searchDoctors);
+// Búsqueda pública de médicos y clínicas
+router.get('/doctors', searchDoctorsAndClinics);
 
 export default router;
