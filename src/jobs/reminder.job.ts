@@ -41,9 +41,9 @@ cron.schedule('* * * * *', async () => {
 
     for (const appointment of upcomingAppointments) {
       // Reconstruimos la fecha/hora exacta de la cita
-      const [hoursStr, minutesStr] = appointment.time.split(':');
-      const hours = Number(hoursStr) || 0;
-      const minutes = Number(minutesStr) || 0;
+      const parts = appointment.startTime.split(':');
+      const hours = Number(parts[0]) || 0;
+      const minutes = Number(parts[1]) || 0;
       const exactAppointmentDate = new Date(appointment.date);
       exactAppointmentDate.setHours(hours, minutes, 0, 0);
 
@@ -60,7 +60,7 @@ cron.schedule('* * * * *', async () => {
       // Ventana de tolerancia: ~3 minutos (para evitar omitir por micro-retrasos en cron, pero asegurando no mandar doble)
       if (!appointment.reminder24hSent && hoursUntilAppointment <= 24.05 && hoursUntilAppointment >= 23.95) {
         reminderTitle = 'Recordatorio: Tu cita es mañana';
-        reminderBody = `Recuerda que tienes una cita en ${appointment.clinicProfile.name} con el Dr(a). ${appointment.doctorProfile.user?.lastName} mañana a las ${appointment.time}.`;
+        reminderBody = `Recuerda que tienes una cita en ${appointment.clinicProfile.name} con el Dr(a). ${appointment.doctorProfile.user?.lastName} mañana a las ${appointment.startTime}.`;
         updates.reminder24hSent = true;
         shouldUpdate = true;
       } 

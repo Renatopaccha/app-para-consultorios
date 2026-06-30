@@ -56,32 +56,52 @@ export const scheduleAppointment = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ error: 'No autorizado' });
     }
 
-    const { doctorId, clinicId, date, time } = req.body;
+    const { doctorId, clinicId, date, startTime, serviceId } = req.body;
 
-    if (!doctorId || !clinicId || !date || !time) {
-      return res.status(400).json({ error: 'Faltan campos obligatorios (doctorId, clinicId, date, time)' });
+    if (!doctorId || !clinicId || !date || !startTime || !serviceId) {
+      return res.status(400).json({ error: 'Faltan campos obligatorios (doctorId, clinicId, date, startTime, serviceId)' });
     }
 
     const appointmentDate = new Date(date);
 
-    // 1. Verificamos que el doctor y la clínica realmente existen
+    // 1. Verificamos que el doctor, la clínica y el servicio realmente existen
     const doctorExists = await prisma.doctorProfile.findUnique({ 
       where: { id: doctorId },
       include: { user: true } // Traemos el user para obtener su email
     });
     const clinicExists = await prisma.clinicProfile.findUnique({ where: { id: clinicId } });
+    const serviceExists = await prisma.service.findUnique({ where: { id: serviceId } });
 
-    if (!doctorExists || !clinicExists) {
-      return res.status(404).json({ error: 'El doctor o la clínica especificada no existen.' });
+    if (!doctorExists || !clinicExists || !serviceExists) {
+      return res.status(404).json({ error: 'El doctor, la clínica o el servicio especificado no existen.' });
     }
+
+    // Calcular endTime en base a la duración del servicio
+    const durationMinutes = serviceExists.duration || 30;
+    const timeToMinutes = (timeString: string) => {
+      const parts = timeString.split(':');
+      const hours = Number(parts[0]) || 0;
+      const minutes = Number(parts[1]) || 0;
+      return hours * 60 + minutes;
+    };
+    const minutesToTime = (totalMinutes: number) => {
+      const hours = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
+      const minutes = (totalMinutes % 60).toString().padStart(2, '0');
+      return `${hours}:${minutes}`;
+    };
+    
+    const startMins = timeToMinutes(startTime);
+    const endTime = minutesToTime(startMins + durationMinutes);
 
     const appointment = await prisma.appointment.create({
       data: {
         patientId, // <-- CRÍTICO: ID blindado extraído del Token JWT, imposible de inyectar por Body
         doctorProfileId: doctorId,
         clinicProfileId: clinicId,
+        serviceId: serviceId,
         date: appointmentDate,
-        time,
+        startTime,
+        endTime,
         status: 'PENDING'
       }
     });
@@ -91,7 +111,8 @@ export const scheduleAppointment = async (req: AuthRequest, res: Response) => {
       const emailHtml = `
         <h3>¡Nueva cita agendada en Vitali!</h3>
         <p>Doctor(a) ${doctorExists.user.firstName} ${doctorExists.user.lastName},</p>
-        <p>Se ha reservado un espacio en su agenda para la fecha <strong>${date}</strong> a las <strong>${time}</strong>.</p>
+        <p>Se ha reservado un espacio en su agenda para la fecha <strong>${date}</strong> de <strong>${startTime}</strong> a <strong>${endTime}</strong>.</p>
+        <p>Servicio solicitado: <strong>${serviceExists.name}</strong></p>
         <p>Revise su panel médico para más detalles.</p>
       `;
       // Llamada asíncrona "fire and forget"

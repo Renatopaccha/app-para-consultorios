@@ -1,5 +1,5 @@
 {
-  "name": "vitali",
+  "name": "zenda",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -24,7 +24,8 @@
     "node-cron": "^4.5.0",
     "nodemailer": "^9.0.1",
     "pg": "^8.21.0",
-    "prisma": "^7.6.0"
+    "prisma": "^7.6.0",
+    "resend": "^6.16.0"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",

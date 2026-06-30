@@ -44,52 +44,52 @@ enum PayerType {
 // ---------------------------------------------------------------------------
 
 model User {
-  id                     String    @id @default(uuid())
-  firstName              String
-  lastName               String
-  email                  String    @unique
-  phone                  String?
-  role                   Role      @default(PATIENT)
-  
-  // Auth & SSO
-  passwordHash           String?
-  provider               String?   // "google", "apple", "local"
-  googleId               String?   @unique
-  fcmToken               String?   // Firebase FCM Token
-  
-  // Seguridad (Fase 2)
-  resetPasswordToken     String?   @unique
-  resetPasswordExpires   DateTime?
-  twoFactorCode          String?
-  twoFactorExpires       DateTime?
-  is2FAEnabled           Boolean   @default(false)
+  id        String  @id @default(uuid())
+  firstName String
+  lastName  String
+  email     String  @unique
+  phone     String?
+  role      Role    @default(PATIENT)
 
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  // Auth & SSO
+  passwordHash String?
+  provider     String? // "google", "apple", "local"
+  googleId     String? @unique
+  fcmToken     String? // Firebase FCM Token
+
+  // Seguridad (Fase 2)
+  resetPasswordToken   String?   @unique
+  resetPasswordExpires DateTime?
+  twoFactorCode        String?
+  twoFactorExpires     DateTime?
+  is2FAEnabled         Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Perfiles Especializados (Relaciones 1 a 1)
-  doctorProfile          DoctorProfile?
-  clinicProfile          ClinicProfile?
-  assistantProfile       AssistantProfile?
+  doctorProfile    DoctorProfile?
+  clinicProfile    ClinicProfile?
+  assistantProfile AssistantProfile?
 
   // Relaciones
-  appointmentsAsPatient  Appointment[] @relation("PatientAppointments")
-  reviewsGiven           Review[]      @relation("PatientReviews")
-  securityLogs           SecurityLog[]
-  
+  appointmentsAsPatient Appointment[] @relation("PatientAppointments")
+  reviewsGiven          Review[]      @relation("PatientReviews")
+  securityLogs          SecurityLog[]
+
   @@index([email])
   @@index([resetPasswordToken])
   @@index([role])
 }
 
 model SecurityLog {
-  id          String   @id @default(uuid())
-  userId      String
-  ipAddress   String
-  userAgent   String
-  createdAt   DateTime @default(now())
+  id        String   @id @default(uuid())
+  userId    String
+  ipAddress String
+  userAgent String
+  createdAt DateTime @default(now())
 
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
@@ -99,85 +99,101 @@ model SecurityLog {
 // ---------------------------------------------------------------------------
 
 model ClinicProfile {
-  id                 String             @id @default(uuid())
-  userId             String             @unique
-  name               String
-  address            String
-  phone              String?
-  latitude           Float?
-  longitude          Float?
-  
+  id        String  @id @default(uuid())
+  userId    String  @unique
+  name      String
+  address   String
+  phone     String?
+  latitude  Float?
+  longitude Float?
+
   // Pagos y Suscripciones
   kushkiCardToken    String?
   subscriptionStatus SubscriptionStatus @default(INACTIVE)
-  
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+
+  // Integración Calendar
+  googleRefreshToken  String?
+  googleAccessToken   String?
+  googleTokenExpiry   DateTime?
+  outlookRefreshToken String?
+  outlookAccessToken  String?
+  outlookTokenExpiry  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relaciones
-  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  affiliatedDoctors  DoctorClinicWorkplace[]
-  appointments       Appointment[]
-  specialties        Specialty[]        
-  insurances         Insurance[]
-  assistants         AssistantProfile[]
+  user              User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  affiliatedDoctors DoctorClinicWorkplace[]
+  appointments      Appointment[]
+  specialties       Specialty[]
+  insurances        Insurance[]
+  assistants        AssistantProfile[]
+  services          Service[]
 
   @@index([latitude, longitude])
   @@index([subscriptionStatus])
 }
 
 model DoctorProfile {
-  id                      String             @id @default(uuid())
-  userId                  String             @unique
-  licenseNumber           String             @unique
-  isVerified              Boolean            @default(false)
-  isIndependent           Boolean            @default(false)
-  biography               String?
-  consultationPrice       Float
-  
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  licenseNumber     String   @unique
+  isVerified        Boolean  @default(false)
+  isIndependent     Boolean  @default(false)
+  bio               String?
+  languages         String[]
+  isAvailable       Boolean  @default(true)
+  consultationPrice Float
+
   // Pagos y Suscripciones
-  walletBalance           Float              @default(0)
-  subscriptionStatus      SubscriptionStatus @default(INACTIVE)
-  subscriptionValidUntil  DateTime?
-  paidBy                  PayerType          @default(SELF)
+  walletBalance          Float              @default(0)
+  subscriptionStatus     SubscriptionStatus @default(INACTIVE)
+  subscriptionValidUntil DateTime?
+  paidBy                 PayerType          @default(SELF)
 
-  // Integración Google Calendar
-  googleRefreshToken      String?
-  googleAccessToken       String?
-  tokenExpiry             DateTime?
+  // Integración Google/Outlook Calendar
+  googleRefreshToken  String?
+  googleAccessToken   String?
+  googleTokenExpiry   DateTime?
+  outlookRefreshToken String?
+  outlookAccessToken  String?
+  outlookTokenExpiry  DateTime?
 
-  createdAt               DateTime           @default(now())
-  updatedAt               DateTime           @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relaciones
-  user                    User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workplaces              DoctorClinicWorkplace[]
-  appointments            Appointment[]
-  reviews                 Review[]
-  specialties             Specialty[]        
-  insurances              Insurance[]
-  assistants              AssistantProfile[]
+  user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workplaces     DoctorClinicWorkplace[]
+  appointments   Appointment[]
+  reviews        Review[]
+  specialties    Specialty[]
+  insurances     Insurance[]
+  assistants     AssistantProfile[]
+  services       Service[]
+  certifications Certification[]
 
   @@index([isVerified])
   @@index([subscriptionStatus])
 }
 
 model AssistantProfile {
-  id               String   @id @default(uuid())
-  userId           String   @unique
-  canViewFinances  Boolean  @default(false)
+  id              String  @id @default(uuid())
+  userId          String  @unique
+  canViewFinances Boolean @default(false)
 
   // A quién asiste (Relaciones opcionales)
-  doctorProfileId  String?
-  clinicProfileId  String?
+  doctorProfileId String?
+  clinicProfileId String?
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relaciones
-  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  doctorProfile    DoctorProfile? @relation(fields: [doctorProfileId], references: [id])
-  clinicProfile    ClinicProfile? @relation(fields: [clinicProfileId], references: [id])
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  doctorProfile DoctorProfile? @relation(fields: [doctorProfileId], references: [id])
+  clinicProfile ClinicProfile? @relation(fields: [clinicProfileId], references: [id])
 
   @@index([doctorProfileId])
   @@index([clinicProfileId])
@@ -188,18 +204,19 @@ model AssistantProfile {
 // ---------------------------------------------------------------------------
 
 model DoctorClinicWorkplace {
-  id               String   @id @default(uuid())
-  doctorProfileId  String
-  clinicProfileId  String
-  isActive         Boolean  @default(true)
-  joinedAt         DateTime @default(now())
-  leftAt           DateTime?
+  id              String    @id @default(uuid())
+  doctorProfileId String
+  clinicProfileId String
+  isActive        Boolean   @default(true)
+  joinedAt        DateTime  @default(now())
+  leftAt          DateTime?
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  doctorProfile    DoctorProfile @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
-  clinicProfile    ClinicProfile @relation(fields: [clinicProfileId], references: [id], onDelete: Cascade)
+  doctorProfile DoctorProfile  @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
+  clinicProfile ClinicProfile  @relation(fields: [clinicProfileId], references: [id], onDelete: Cascade)
+  schedules     WorkSchedule[]
 
   @@unique([doctorProfileId, clinicProfileId])
   @@index([doctorProfileId])
@@ -212,86 +229,150 @@ model DoctorClinicWorkplace {
 // ---------------------------------------------------------------------------
 
 model Specialty {
-  id          String   @id @default(uuid())
-  name        String   @unique
+  id          String  @id @default(uuid())
+  name        String  @unique
   description String?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relaciones
-  doctorProfiles   DoctorProfile[]
-  clinicProfiles   ClinicProfile[]
+  doctorProfiles DoctorProfile[]
+  clinicProfiles ClinicProfile[]
 
   @@index([name])
 }
 
 model Insurance {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id   String @id @default(uuid())
+  name String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relaciones
-  doctorProfiles   DoctorProfile[]
-  clinicProfiles   ClinicProfile[]
+  doctorProfiles DoctorProfile[]
+  clinicProfiles ClinicProfile[]
 
   @@index([name])
 }
 
 model Appointment {
-  id                  String            @id @default(uuid())
-  patientId           String
-  doctorProfileId     String
-  clinicProfileId     String
-  
-  date                DateTime
-  time                String            
-  status              AppointmentStatus @default(PENDING)
-  
+  id              String @id @default(uuid())
+  patientId       String
+  doctorProfileId String
+  clinicProfileId String
+  serviceId       String
+
+  date      DateTime
+  startTime String
+  endTime   String
+  status    AppointmentStatus @default(PENDING)
+
   // Pagos
-  paymentStatus       PaymentStatus     @default(PENDING)
-  paymentId           String?           @unique
-  commissionAmount    Float?
+  paymentMethod      String        @default("NONE")
+  paymentStatus      PaymentStatus @default(PENDING)
+  paymentId          String?       @unique
+  verificationCode   String?       @unique
+  commissionAmount   Float?
+  cancellationReason String?
 
-  // Recordatorios
-  reminder24hSent     Boolean           @default(false)
-  reminder2hSent      Boolean           @default(false)
-  reminder1hSent      Boolean           @default(false)
+  // Recordatorios y Asistencia
+  turnNumber         Int?
+  isPatientConfirmed Boolean  @default(false)
+  reminder24hSent    Boolean  @default(false)
+  reminder2hSent     Boolean  @default(false)
+  reminder1hSent     Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
+  // Integración Calendarios Externos
+  googleEventId  String?
+  outlookEventId String?
 
   // Relaciones
-  patient             User              @relation("PatientAppointments", fields: [patientId], references: [id])
-  doctorProfile       DoctorProfile     @relation(fields: [doctorProfileId], references: [id])
-  clinicProfile       ClinicProfile     @relation(fields: [clinicProfileId], references: [id])
-  review              Review?           
+  patient       User          @relation("PatientAppointments", fields: [patientId], references: [id])
+  doctorProfile DoctorProfile @relation(fields: [doctorProfileId], references: [id])
+  clinicProfile ClinicProfile @relation(fields: [clinicProfileId], references: [id])
+  service       Service       @relation(fields: [serviceId], references: [id])
+  review        Review?
 
   @@index([patientId])
   @@index([doctorProfileId])
   @@index([clinicProfileId])
+  @@index([serviceId])
   @@index([date])
   @@index([status])
 }
 
 model Review {
-  id                String   @id @default(uuid())
-  appointmentId     String   @unique
-  patientId         String
-  doctorProfileId   String
-  
-  rating            Int      
-  comment           String?
+  id              String @id @default(uuid())
+  appointmentId   String @unique
+  patientId       String
+  doctorProfileId String
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  rating  Int
+  comment String?
 
-  appointment       Appointment   @relation(fields: [appointmentId], references: [id])
-  patient           User          @relation("PatientReviews", fields: [patientId], references: [id])
-  doctorProfile     DoctorProfile @relation(fields: [doctorProfileId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointment   Appointment   @relation(fields: [appointmentId], references: [id])
+  patient       User          @relation("PatientReviews", fields: [patientId], references: [id])
+  doctorProfile DoctorProfile @relation(fields: [doctorProfileId], references: [id])
 
   @@index([doctorProfileId])
   @@index([patientId])
+}
+
+model Service {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+  price       Float   @default(0)
+  duration    Int? // en minutos
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones opcionales (un servicio puede pertenecer a un doctor o a una clínica)
+  doctorProfileId String?
+  clinicProfileId String?
+
+  doctorProfile DoctorProfile? @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
+  clinicProfile ClinicProfile? @relation(fields: [clinicProfileId], references: [id], onDelete: Cascade)
+  appointments  Appointment[]
+
+  @@index([doctorProfileId])
+  @@index([clinicProfileId])
+}
+
+model Certification {
+  id          String @id @default(uuid())
+  name        String
+  institution String
+  year        Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  doctorProfileId String
+  doctorProfile   DoctorProfile @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
+
+  @@index([doctorProfileId])
+}
+
+model WorkSchedule {
+  id        String @id @default(uuid())
+  dayOfWeek Int // 0=Domingo, 1=Lunes, 2=Martes...
+  startTime String // Formato "HH:MM", ej: "08:00"
+  endTime   String // Formato "HH:MM", ej: "12:00"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  workplaceId String
+  workplace   DoctorClinicWorkplace @relation(fields: [workplaceId], references: [id], onDelete: Cascade)
+
+  @@index([workplaceId])
 }

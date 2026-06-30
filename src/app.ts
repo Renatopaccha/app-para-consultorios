@@ -10,6 +10,11 @@ import reviewRoutes from './routes/review.routes';
 import appointmentRoutes from './routes/appointment.routes';
 import patientRoutes from './routes/patient.routes';
 import googleAuthRoutes from './routes/googleAuth.routes';
+import searchRoutes from './routes/search.routes';
+import bookingRoutes from './routes/booking.routes';
+import calendarRoutes from './routes/calendar.routes';
+import dashboardRoutes from './routes/dashboard.routes';
+import assistantRoutes from './routes/assistant.routes';
 
 // Tareas programadas (Cron Jobs)
 import './jobs/reminder.job';
@@ -37,5 +42,10 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/google', googleAuthRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/bookings', bookingRoutes);
+app.use('/api/calendar', calendarRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/assistant', assistantRoutes);
 
 export default app;
