@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
 import { syncAppointmentToCalendar, updateCalendarEventStatus, deleteCalendarEvent } from '../services/calendarSync.service';
+import { emailService } from '../services/email.service';
 
 export const getAvailableSlots = async (req: Request, res: Response) => {
   try {
@@ -142,9 +143,16 @@ export const bookAppointment = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Faltan parámetros requeridos' });
     }
 
-    // Paso A: Obtener servicio
-    const service = await prisma.service.findUnique({ where: { id: serviceId } });
+    // Paso A: Obtener datos base
+    const [service, patient, doctor] = await Promise.all([
+      prisma.service.findUnique({ where: { id: serviceId } }),
+      prisma.user.findUnique({ where: { id: userId } }),
+      prisma.doctorProfile.findUnique({ where: { id: doctorId }, include: { user: true } })
+    ]);
+
     if (!service) return res.status(404).json({ error: 'Servicio no encontrado' });
+    if (!patient) return res.status(404).json({ error: 'Paciente no encontrado' });
+    if (!doctor || !doctor.user) return res.status(404).json({ error: 'Doctor no encontrado' });
 
     const durationMinutes = service.duration || 30;
     const price = service.price || 0;
@@ -262,6 +270,33 @@ export const bookAppointment = async (req: AuthRequest, res: Response) => {
 
     // Inyectamos el evento al calendario al momento de crear la reserva
     syncAppointmentToCalendar(appointment.id).catch(console.error);
+
+    // Correos Transaccionales Asíncronos
+    const patientName = patient.firstName || 'Paciente';
+    const doctorName = doctor.user.lastName ? `Dr/Dra. ${doctor.user.lastName}` : 'Especialista';
+    const formattedDate = appointmentDate.toISOString().split('T')[0];
+
+    // A) Correo al Paciente
+    emailService.sendAppointmentConfirmation(
+      patient.email,
+      patientName,
+      doctorName,
+      formattedDate,
+      startTime,
+      turnNumber,
+      paymentMethod === 'CASH',
+      verificationCode
+    ).catch(console.error);
+
+    // B) Correo al Doctor
+    emailService.sendDoctorNewBooking(
+      doctor.user.email,
+      doctorName,
+      patientName,
+      formattedDate,
+      startTime,
+      service.name
+    ).catch(console.error);
 
     res.status(201).json(appointment);
 

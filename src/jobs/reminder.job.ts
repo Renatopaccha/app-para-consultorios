@@ -59,20 +59,20 @@ cron.schedule('* * * * *', async () => {
 
       // Ventana de tolerancia: ~3 minutos (para evitar omitir por micro-retrasos en cron, pero asegurando no mandar doble)
       if (!appointment.reminder24hSent && hoursUntilAppointment <= 24.05 && hoursUntilAppointment >= 23.95) {
-        reminderTitle = 'Recordatorio: Tu cita es mañana';
-        reminderBody = `Recuerda que tienes una cita en ${appointment.clinicProfile.name} con el Dr(a). ${appointment.doctorProfile.user?.lastName} mañana a las ${appointment.startTime}.`;
+        reminderTitle = 'Recordatorio de Cita Médica 🩺';
+        reminderBody = `Hola ${appointment.patient.firstName}, tu cita con el Dr. ${appointment.doctorProfile.user?.lastName} es mañana a las ${appointment.startTime}. Tienes el Turno #${appointment.turnNumber}. ¡Te esperamos en ${appointment.clinicProfile.name}!`;
         updates.reminder24hSent = true;
         shouldUpdate = true;
       } 
       else if (!appointment.reminder2hSent && hoursUntilAppointment <= 2.05 && hoursUntilAppointment >= 1.95) {
-        reminderTitle = 'Recordatorio: Tu cita es en 2 horas';
-        reminderBody = `Tu cita en ${appointment.clinicProfile.name} comienza en 2 horas. Por favor llega con anticipación.`;
+        reminderTitle = 'Tu cita es en 2 horas ⏰';
+        reminderBody = `Hola ${appointment.patient.firstName}, recuerda que tu cita con el Dr. ${appointment.doctorProfile.user?.lastName} empieza en 2 horas a las ${appointment.startTime}. Turno #${appointment.turnNumber}. ¡Llega con anticipación!`;
         updates.reminder2hSent = true;
         shouldUpdate = true;
       } 
       else if (!appointment.reminder1hSent && hoursUntilAppointment <= 1.05 && hoursUntilAppointment >= 0.95) {
-        reminderTitle = '¡Tu cita es en 1 hora!';
-        reminderBody = `Prepárate, tu cita con el Dr(a). ${appointment.doctorProfile.user?.lastName} empieza en 1 hora.`;
+        reminderTitle = '¡Tu cita es en 1 hora! ⏳';
+        reminderBody = `Hola ${appointment.patient.firstName}, prepárate. Tu cita (Turno #${appointment.turnNumber}) con el Dr. ${appointment.doctorProfile.user?.lastName} es a las ${appointment.startTime}. ¡Te esperamos!`;
         updates.reminder1hSent = true;
         shouldUpdate = true;
       }

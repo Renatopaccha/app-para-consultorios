@@ -188,5 +188,79 @@ export const emailService = {
     } catch (error) {
       console.error(`[EmailService] Error enviando aviso de cancelación a ${to}:`, error);
     }
+  },
+
+  /**
+   * Envía confirmación de cita al paciente (incluyendo PIN si es pago en efectivo)
+   */
+  async sendAppointmentConfirmation(to: string, patientName: string, doctorName: string, date: string, time: string, turnNumber: number, isCash: boolean, pin?: string | null) {
+    try {
+      const pinHtml = isCash && pin 
+        ? `<div style="background-color: #fdf2e9; padding: 15px; border-left: 4px solid #e67e22; margin: 20px 0;">
+             <h3 style="color: #d35400; margin-top: 0;">Tu PIN de Confirmación: <span style="font-size: 24px; letter-spacing: 2px;">${pin}</span></h3>
+             <p style="color: #555; margin-bottom: 0;">Presenta este código en recepción para confirmar tu pago en efectivo.</p>
+           </div>` 
+        : '';
+
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">
+          <h2 style="color: #2c3e50;">¡Cita Reservada con Éxito! 🎉</h2>
+          <p style="color: #555; line-height: 1.5;">Hola ${patientName}, tu reserva ha sido procesada correctamente.</p>
+          <ul style="color: #555; line-height: 1.5; background-color: #f9f9f9; padding: 15px 30px; border-radius: 5px;">
+            <li><strong>Doctor(a):</strong> ${doctorName}</li>
+            <li><strong>Fecha:</strong> ${date}</li>
+            <li><strong>Hora:</strong> ${time}</li>
+            <li><strong>Turno Asignado:</strong> #${turnNumber}</li>
+          </ul>
+          ${pinHtml}
+          <p style="color: #555; line-height: 1.5;">Gracias por confiar en Zenda para tu salud.</p>
+          <hr style="border: 0; border-top: 1px solid #eaeaea; margin: 20px 0;" />
+          <p style="font-size: 12px; color: #888; text-align: center;">El equipo de Zenda 🏥</p>
+        </div>
+      `;
+
+      await resend.emails.send({
+        from: FROM_EMAIL,
+        to,
+        subject: `Confirmación de Cita - Zenda`,
+        html,
+      });
+      console.log(`[EmailService] Confirmación de cita enviada a ${to}`);
+    } catch (error) {
+      console.error(`[EmailService] Error enviando confirmación a ${to}:`, error);
+    }
+  },
+
+  /**
+   * Envía notificación de nueva cita al doctor
+   */
+  async sendDoctorNewBooking(to: string, doctorName: string, patientName: string, date: string, time: string, serviceName: string) {
+    try {
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">
+          <h2 style="color: #2c3e50;">Nueva Cita Agendada 📅</h2>
+          <p style="color: #555; line-height: 1.5;">Hola Dr./Dra. ${doctorName}, tienes un nuevo paciente en tu agenda.</p>
+          <ul style="color: #555; line-height: 1.5; background-color: #f4f6f8; padding: 15px 30px; border-radius: 5px;">
+            <li><strong>Paciente:</strong> ${patientName}</li>
+            <li><strong>Fecha:</strong> ${date}</li>
+            <li><strong>Hora:</strong> ${time}</li>
+            <li><strong>Servicio:</strong> ${serviceName}</li>
+          </ul>
+          <p style="color: #555; line-height: 1.5;">Puedes revisar los detalles completos en tu panel de control.</p>
+          <hr style="border: 0; border-top: 1px solid #eaeaea; margin: 20px 0;" />
+          <p style="font-size: 12px; color: #888; text-align: center;">El equipo de Zenda 🏥</p>
+        </div>
+      `;
+
+      await resend.emails.send({
+        from: FROM_EMAIL,
+        to,
+        subject: `Nueva cita agendada: ${patientName}`,
+        html,
+      });
+      console.log(`[EmailService] Notificación a doctor enviada a ${to}`);
+    } catch (error) {
+      console.error(`[EmailService] Error notificando al doctor en ${to}:`, error);
+    }
   }
 };
