@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import prisma from '../prisma';
 import { notificationService } from '../services/notification.service';
+import { deleteCalendarEvent } from '../services/calendarSync.service';
 
 const logTimestamp = () => new Date().toISOString();
 
@@ -57,16 +58,51 @@ cron.schedule('* * * * *', async () => {
       let reminderTitle = '';
       let reminderBody = '';
 
+      const pinText = appointment.verificationCode ? ` Tu PIN de pago en caja es: ${appointment.verificationCode}.` : '';
+
+      // AUTO-CANCELACIÓN: Si faltan <= 12h y el paciente no ha confirmado
+      if (hoursUntilAppointment <= 12.00 && !appointment.isPatientConfirmed && appointment.status === 'PENDING') {
+        // Cancelar en BD
+        await prisma.appointment.update({
+          where: { id: appointment.id },
+          data: {
+            status: 'CANCELLED',
+            cancellationReason: 'Cancelación automática: El paciente no confirmó su asistencia en el tiempo límite.'
+          }
+        });
+
+        // Liberar agenda de Google/Outlook
+        deleteCalendarEvent(appointment.id).catch(console.error);
+
+        // Notificar al paciente
+        const cancelTitle = 'Cita Cancelada ❌';
+        const cancelBody = `Tu cita con el Dr. ${appointment.doctorProfile.user?.lastName} ha sido cancelada debido a que no confirmaste tu asistencia a tiempo. Por favor, agenda un nuevo turno.`;
+        
+        const cancelHtml = `
+          <h3>${cancelTitle}</h3>
+          <p>Hola ${appointment.patient.firstName},</p>
+          <p>${cancelBody}</p>
+        `;
+        
+        notificationService.sendEmail(appointment.patient.email, cancelTitle, cancelHtml).catch(console.error);
+        if (appointment.patient.fcmToken) {
+          notificationService.sendPushNotification(appointment.patient.fcmToken, cancelTitle, cancelBody).catch(console.error);
+        }
+
+        console.log(`[ReminderJob ${logTimestamp()}] Cita ${appointment.id} cancelada automáticamente por falta de confirmación (<= 12h).`);
+        continue;
+      }
+
       // Ventana de tolerancia: ~3 minutos (para evitar omitir por micro-retrasos en cron, pero asegurando no mandar doble)
       if (!appointment.reminder24hSent && hoursUntilAppointment <= 24.05 && hoursUntilAppointment >= 23.95) {
         reminderTitle = 'Recordatorio de Cita Médica 🩺';
-        reminderBody = `Hola ${appointment.patient.firstName}, tu cita con el Dr. ${appointment.doctorProfile.user?.lastName} es mañana a las ${appointment.startTime}. Tienes el Turno #${appointment.turnNumber}. ¡Te esperamos en ${appointment.clinicProfile.name}!`;
+        reminderBody = `Hola ${appointment.patient.firstName}, recuerda tu cita con el Dr. ${appointment.doctorProfile.user?.lastName} a las ${appointment.startTime}. Turno #${appointment.turnNumber}.${pinText} ¡Te esperamos en ${appointment.clinicProfile.name}!`;
         updates.reminder24hSent = true;
         shouldUpdate = true;
       } 
       else if (!appointment.reminder2hSent && hoursUntilAppointment <= 2.05 && hoursUntilAppointment >= 1.95) {
         reminderTitle = 'Tu cita es en 2 horas ⏰';
-        reminderBody = `Hola ${appointment.patient.firstName}, recuerda que tu cita con el Dr. ${appointment.doctorProfile.user?.lastName} empieza en 2 horas a las ${appointment.startTime}. Turno #${appointment.turnNumber}. ¡Llega con anticipación!`;
+        reminderBody = `Hola ${appointment.patient.firstName}, recuerda tu cita con el Dr. ${appointment.doctorProfile.user?.lastName} a las ${appointment.startTime}. Turno #${appointment.turnNumber}.${pinText} ¡Llega con anticipación!`;
         updates.reminder2hSent = true;
         shouldUpdate = true;
       } 

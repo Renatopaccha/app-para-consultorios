@@ -137,7 +137,7 @@ export const bookAppointment = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'No autorizado' });
 
-    const { doctorId, clinicId, serviceId, date, startTime, paymentMethod } = req.body;
+    const { doctorId, clinicId, serviceId, date, startTime, paymentMethod, isRevision } = req.body;
 
     if (!doctorId || !clinicId || !serviceId || !date || !startTime || !paymentMethod) {
       return res.status(400).json({ error: 'Faltan parámetros requeridos' });
@@ -200,12 +200,13 @@ export const bookAppointment = async (req: AuthRequest, res: Response) => {
     let finalPaymentMethod = paymentMethod;
     let finalPaymentStatus = 'PENDING';
     let finalStatus = 'PENDING'; // Mapeamos 'PENDING_CONFIRMATION' a 'PENDING'
-    let verificationCode = null;
+    let verificationCode: string | null = null;
 
-    if (price === 0) {
+    if (isRevision === true || price === 0) {
       finalPaymentMethod = 'NONE';
       finalPaymentStatus = 'PAID';
       finalStatus = 'CONFIRMED';
+      verificationCode = null;
     } else if (paymentMethod === 'CARD') {
       finalPaymentStatus = 'PAID';
       finalStatus = 'CONFIRMED'; // Simulamos éxito por ahora
@@ -274,7 +275,7 @@ export const bookAppointment = async (req: AuthRequest, res: Response) => {
     // Correos Transaccionales Asíncronos
     const patientName = patient.firstName || 'Paciente';
     const doctorName = doctor.user.lastName ? `Dr/Dra. ${doctor.user.lastName}` : 'Especialista';
-    const formattedDate = appointmentDate.toISOString().split('T')[0];
+    const formattedDate = appointmentDate.toISOString().split('T')[0] || '';
 
     // A) Correo al Paciente
     emailService.sendAppointmentConfirmation(
@@ -455,7 +456,7 @@ export const confirmPatientAttendance = async (req: AuthRequest, res: Response) 
 
     const updatedAppointment = await prisma.appointment.update({
       where: { id: appointmentId },
-      data: { isPatientConfirmed: true }
+      data: { isPatientConfirmed: true, status: 'CONFIRMED' }
     });
 
     // Actualizamos el evento en el calendario externo de forma asíncrona
@@ -472,3 +473,96 @@ export const confirmPatientAttendance = async (req: AuthRequest, res: Response) 
   }
 };
 
+export const getAppointments = async (req: Request, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const skip = (page - 1) * limit;
+
+    const appointments = await prisma.appointment.findMany({
+      skip,
+      take: limit,
+      include: {
+        patient: { select: { firstName: true, lastName: true, email: true } },
+        doctorProfile: { include: { user: { select: { firstName: true, lastName: true } } } },
+        clinicProfile: { select: { name: true, address: true } }
+      }
+    });
+    res.json(appointments);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al obtener citas' });
+  }
+};
+
+export const getAppointmentById = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const appointment = await prisma.appointment.findUnique({ 
+      where: { id: id as string },
+      include: {
+        patient: { select: { firstName: true, lastName: true, email: true } },
+        doctorProfile: { include: { user: { select: { firstName: true, lastName: true } } } },
+        clinicProfile: { select: { name: true, address: true } }
+      }
+    });
+    if (!appointment) {
+      return res.status(404).json({ error: 'Cita no encontrada' });
+    }
+    res.json(appointment);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al obtener cita' });
+  }
+};
+
+export const updateBookingStatus = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    const userId = req.user?.id;
+    const userRole = req.user?.role;
+
+    if (!status) {
+      return res.status(400).json({ error: 'El estado (status) es requerido' });
+    }
+
+    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'MISSED'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Estado no válido. Opciones permitidas: ' + validStatuses.join(', ') });
+    }
+
+    const appointment = await prisma.appointment.findUnique({
+      where: { id: id as string }
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: 'Cita no encontrada' });
+    }
+
+    // Validar que el Doctor o la Clínica sea dueño de la cita
+    if (userRole === 'DOCTOR') {
+      const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
+      if (doctor?.id !== appointment.doctorProfileId) {
+         return res.status(403).json({ error: 'No tienes permisos para modificar el estado de esta cita' });
+      }
+    } else if (userRole === 'CLINIC_ADMIN') {
+      const clinic = await prisma.clinicProfile.findUnique({ where: { userId } });
+      if (clinic?.id !== appointment.clinicProfileId) {
+         return res.status(403).json({ error: 'No tienes permisos para modificar el estado de esta cita' });
+      }
+    } else if (userRole !== 'SUPER_ADMIN') {
+       return res.status(403).json({ error: 'Rol no autorizado para esta acción' });
+    }
+
+    const updatedAppointment = await prisma.appointment.update({
+      where: { id: id as string },
+      data: { status }
+    });
+
+    res.json({ message: 'Estado actualizado correctamente', appointment: updatedAppointment });
+  } catch (error) {
+    console.error('[Booking Controller] Error en updateBookingStatus:', error);
+    res.status(500).json({ error: 'Error al actualizar el estado de la cita' });
+  }
+};
