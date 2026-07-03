@@ -25,9 +25,17 @@ enum AppointmentStatus {
 }
 
 enum PaymentStatus {
-  PENDING
+  PENDING_CASH
+  PENDING_TRANSFER
   PAID
-  REFUNDED
+  WAIVED
+  REFUNDED // Retenido por compatibilidad con datos existentes
+}
+
+enum AppointmentType {
+  IN_PERSON
+  TELEMEDICINE
+  HOME_VISIT
 }
 
 enum SubscriptionStatus {
@@ -109,6 +117,7 @@ model ClinicProfile {
   logoUrl   String?
   latitude  Float?
   longitude Float?
+  color     String? @db.VarChar(7)
 
   // Pagos y Suscripciones
   kushkiCardToken    String?
@@ -272,11 +281,14 @@ model Appointment {
   date      DateTime
   startTime String
   endTime   String
+  startDatetime DateTime? @db.Timestamptz // Fecha y hora con zona horaria integrada
   status    AppointmentStatus @default(PENDING)
+  appointmentType AppointmentType @default(IN_PERSON)
+  notes     String?
 
   // Pagos
   paymentMethod      String        @default("NONE")
-  paymentStatus      PaymentStatus @default(PENDING)
+  paymentStatus      PaymentStatus @default(PENDING_CASH)
   paymentId          String?       @unique
   verificationCode   String?       @unique
   commissionAmount   Float?
@@ -369,7 +381,8 @@ model Certification {
 
 model WorkSchedule {
   id        String @id @default(uuid())
-  dayOfWeek Int // 0=Domingo, 1=Lunes, 2=Martes...
+  weekday   Int    // ISO: 0 = Lunes y 6 = Domingo
+  timezone  String? // ej: "America/Guayaquil"
   startTime String // Formato "HH:MM", ej: "08:00"
   endTime   String // Formato "HH:MM", ej: "12:00"
 

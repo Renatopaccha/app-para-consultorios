@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getDoctors, getDoctorById, createDoctor, getMyAppointments, updateDoctorProfile, addService, addCertification, addWorkSchedule } from '../controllers/doctor.controller';
+import { getDoctors, getDoctorById, createDoctor, getMyAppointments, updateDoctorProfile, addService, addCertification, addWorkSchedule, getMySchedules } from '../controllers/doctor.controller';
 import { authenticate, requireRole } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -10,6 +10,8 @@ router.put('/profile', authenticate, requireRole(['DOCTOR']), updateDoctorProfil
 router.post('/services', authenticate, requireRole(['DOCTOR']), addService);
 router.post('/certifications', authenticate, requireRole(['DOCTOR']), addCertification);
 router.post('/schedules', authenticate, requireRole(['DOCTOR']), addWorkSchedule);
+router.get('/schedules', authenticate, requireRole(['DOCTOR']), getMySchedules);
+
 
 router.get('/', getDoctors);
 router.post('/', createDoctor);

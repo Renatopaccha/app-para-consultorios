@@ -206,3 +206,21 @@ export const getClinicDoctors = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Error al obtener los doctores de la clínica' });
   }
 };
+
+export const getMyClinics = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
+    if (!doctor) return res.status(403).json({ error: 'No autorizado' });
+
+    const workplaces = await prisma.doctorClinicWorkplace.findMany({
+      where: { doctorProfileId: doctor.id, isActive: true },
+      include: { clinicProfile: true }
+    });
+
+    const clinics = workplaces.map(wp => wp.clinicProfile);
+    return res.json(clinics);
+  } catch (error) {
+    return res.status(500).json({ error: 'Error del servidor' });
+  }
+};

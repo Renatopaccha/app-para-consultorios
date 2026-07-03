@@ -301,9 +301,9 @@ export const addWorkSchedule = async (req: AuthRequest, res: Response) => {
     const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
     if (!doctor) return res.status(404).json({ error: 'Perfil no encontrado' });
 
-    const { clinicId, dayOfWeek, startTime, endTime } = req.body;
-    if (!clinicId || dayOfWeek === undefined || !startTime || !endTime) {
-      return res.status(400).json({ error: 'Faltan campos requeridos (clinicId, dayOfWeek, startTime, endTime)' });
+    const { clinicId, weekday, timezone, startTime, endTime } = req.body;
+    if (!clinicId || weekday === undefined || !startTime || !endTime) {
+      return res.status(400).json({ error: 'Faltan campos requeridos (clinicId, weekday, startTime, endTime)' });
     }
 
     // Validar que el doctor esté activo en esa clínica
@@ -323,7 +323,8 @@ export const addWorkSchedule = async (req: AuthRequest, res: Response) => {
     // Crear el horario conectado al workplace
     const schedule = await prisma.workSchedule.create({
       data: {
-        dayOfWeek: parseInt(dayOfWeek),
+        weekday: parseInt(weekday),
+        timezone: timezone || null,
         startTime,
         endTime,
         workplaceId: workplace.id
@@ -336,3 +337,23 @@ export const addWorkSchedule = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Error al añadir el horario de trabajo' });
   }
 };
+
+export const getMySchedules = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
+    if (!doctor) return res.status(403).json({ error: 'No autorizado' });
+
+    const schedules = await prisma.workSchedule.findMany({
+      where: {
+        workplace: { doctorProfileId: doctor.id }
+      },
+      include: { workplace: { include: { clinicProfile: true } } }
+    });
+
+    return res.json(schedules);
+  } catch (error) {
+    return res.status(500).json({ error: 'Error del servidor' });
+  }
+};
+

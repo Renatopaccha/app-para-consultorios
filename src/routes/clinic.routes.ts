@@ -5,7 +5,8 @@ import {
   createClinic,
   addDoctorToClinic,
   removeDoctorFromClinic,
-  getClinicDoctors
+  getClinicDoctors,
+  getMyClinics
 } from '../controllers/clinic.controller';
 import { authenticate, requireRole } from '../middlewares/auth.middleware';
 
@@ -17,6 +18,10 @@ router.get('/:id', getClinicById);
 router.post('/', createClinic);
 
 // --- Rutas de Médico Híbrido ---
+
+// Obtener las clínicas del médico autenticado
+router.get('/my-clinics', authenticate, requireRole(['DOCTOR']), getMyClinics);
+
 
 // Listar doctores de una clínica específica (Pública para que los pacientes puedan ver el directorio)
 router.get('/:clinicProfileId/doctors', getClinicDoctors);

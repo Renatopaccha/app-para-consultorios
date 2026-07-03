@@ -72,7 +72,7 @@ export const getAssistantDashboard = async (req: AuthRequest, res: Response) => 
     });
 
     const pendingPayments = appointments.filter(
-      appt => appt.paymentStatus === 'PENDING' && appt.paymentMethod === 'CASH'
+      appt => appt.paymentStatus === 'PENDING_CASH' && appt.paymentMethod === 'CASH'
     );
 
     return res.status(200).json({

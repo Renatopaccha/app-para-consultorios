@@ -473,25 +473,37 @@ export const confirmPatientAttendance = async (req: AuthRequest, res: Response) 
   }
 };
 
-export const getAppointments = async (req: Request, res: Response) => {
+export const getAppointments = async (req: AuthRequest, res: Response) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
-    const skip = (page - 1) * limit;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'No autorizado' });
+
+    const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
+    if (!doctor) return res.status(403).json({ error: 'Acceso exclusivo para doctores' });
 
     const appointments = await prisma.appointment.findMany({
-      skip,
-      take: limit,
+      where: { doctorProfileId: doctor.id },
       include: {
-        patient: { select: { firstName: true, lastName: true, email: true } },
-        doctorProfile: { include: { user: { select: { firstName: true, lastName: true } } } },
-        clinicProfile: { select: { name: true, address: true } }
+        patient: { select: { id: true, firstName: true, lastName: true } }
       }
     });
-    res.json(appointments);
+
+    const formattedAppointments = appointments.map(app => {
+      const formattedDate = app.startDatetime 
+        ? app.startDatetime.toISOString()
+        : null;
+
+      return {
+        ...app,
+        patientId: app.patient.id,
+        startDatetime: formattedDate,
+      };
+    });
+
+    return res.json(formattedAppointments);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Error al obtener citas' });
+    return res.status(500).json({ error: 'Error al obtener citas' });
   }
 };
 
