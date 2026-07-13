@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import crypto from 'crypto';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
+import { createAppointment } from '../services/appointmentBooking.service';
 import { buildServiceSnapshot } from '../services/serviceSnapshot.service';
 import { syncAppointmentToCalendar, updateCalendarEventStatus, deleteCalendarEvent } from '../services/calendarSync.service';
 import { emailService } from '../services/email.service';
@@ -263,23 +264,7 @@ export const bookAppointment = async (req: AuthRequest, res: Response) => {
 
     // Paso E: Crear Cita
 
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId: userId,
-        doctorProfileId: doctorId,
-        clinicProfileId: clinicId,
-        serviceId: serviceId,
-        date: appointmentDate,
-        startTime,
-        endTime,
-        status: finalStatus as any,
-        paymentMethod: finalPaymentMethod,
-        paymentStatus: finalPaymentStatus as any,
-        verificationCode,
-        turnNumber,
-        ...snapshot
-      }
-    });
+    const appointment = await createAppointment({ patientUserId: userId, doctorId, clinicId, serviceId, requestedStart: `${date}T${startTime}`, paymentMethod });
 
     // Inyectamos el evento al calendario al momento de crear la reserva
     syncAppointmentToCalendar(appointment.id).catch(console.error);

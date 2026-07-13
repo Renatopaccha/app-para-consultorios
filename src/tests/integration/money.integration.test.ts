@@ -63,4 +63,16 @@ describe('snapshot monetario con PostgreSQL real', () => {
     expect(await prisma.appointment.findUnique({ where: { id: created.body.id } })).toMatchObject({ status: 'CANCELLED', cancelledByUserId: patientId });
     expect(await prisma.appointmentChangeLog.count({ where: { appointmentId: created.body.id, changeType: 'CANCELLED' } })).toBe(1);
   });
+
+  it('reserva y bloqueo simultáneos dejan una sola ocupación', async () => {
+    const service = await prisma.service.create({ data: { name: 'Bloqueable', price: 20, priceCents: 2000, duration: 30, doctorProfileId: doctorId } });
+    const startsAt = '2026-08-05T09:00:00-05:00';
+    const [booking, block] = await Promise.all([
+      request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send({ doctorId, clinicId, serviceId: service.id, startsAt, paymentMethod: 'CASH' }),
+      request(app).post('/api/schedule-blocks').set('Authorization', `Bearer ${doctorToken}`).send({ doctorId, clinicId, startsAt, endsAt: '2026-08-05T09:30:00-05:00', reason: 'Prueba de carrera' }),
+    ]);
+    expect([booking.status, block.status].sort()).toEqual([201, 409]);
+    const instant = new Date('2026-08-05T14:00:00.000Z');
+    expect((await prisma.appointment.count({ where: { doctorProfileId: doctorId, startsAt: instant } })) + (await prisma.scheduleBlock.count({ where: { doctorProfileId: doctorId, startsAt: instant } }))).toBe(1);
+  });
 });
