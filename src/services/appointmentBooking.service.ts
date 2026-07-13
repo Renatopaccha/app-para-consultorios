@@ -41,3 +41,34 @@ export async function createAppointment(input: { patientUserId: string; doctorId
     throw error;
   }
 }
+
+export async function cancelAppointment(appointmentId: string, actorId: string, reason?: string) {
+  return prisma.$transaction(async tx => {
+    const appointment = await tx.appointment.findUnique({ where: { id: appointmentId } });
+    if (!appointment) throw new BookingError('APPOINTMENT_NOT_FOUND', 404, 'Cita no encontrada.');
+    if (appointment.patientId !== actorId && (await tx.doctorProfile.findUnique({ where: { id: appointment.doctorProfileId } }))?.userId !== actorId) throw new BookingError('FORBIDDEN', 403, 'No tienes permisos.');
+    if (appointment.status === 'CANCELLED') return appointment;
+    const updated = await tx.appointment.update({ where: { id: appointment.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByUserId: actorId, cancellationReason: reason || null } });
+    await tx.appointmentChangeLog.create({ data: { appointmentId, changedByUserId: actorId, changeType: 'CANCELLED', previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, newStartsAt: appointment.startsAt, newEndsAt: appointment.endsAt, previousStatus: appointment.status, newStatus: 'CANCELLED', reason: reason || null } });
+    return updated;
+  });
+}
+
+export async function rescheduleAppointment(appointmentId: string, actorId: string, requestedStart: unknown) {
+  const startsAt = parseRequestedStart(requestedStart);
+  try { return await prisma.$transaction(async tx => {
+    const appointment = await tx.appointment.findUnique({ where: { id: appointmentId } });
+    if (!appointment) throw new BookingError('APPOINTMENT_NOT_FOUND', 404, 'Cita no encontrada.');
+    const doctor = await tx.doctorProfile.findUnique({ where: { id: appointment.doctorProfileId } });
+    if (appointment.patientId !== actorId && doctor?.userId !== actorId) throw new BookingError('FORBIDDEN', 403, 'No tienes permisos.');
+    if (appointment.status === 'CANCELLED' || appointment.status === 'COMPLETED' || !appointment.serviceDurationMinutesSnapshot) throw new BookingError('RESCHEDULE_NOT_ALLOWED', 422, 'La cita no puede reprogramarse.');
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${appointment.doctorProfileId}))`;
+    const endsAt = new Date(startsAt.getTime() + appointment.serviceDurationMinutesSnapshot * 60_000);
+    const workplace = await tx.doctorClinicWorkplace.findUnique({ where: { doctorProfileId_clinicProfileId: { doctorProfileId: appointment.doctorProfileId, clinicProfileId: appointment.clinicProfileId } } });
+    const weekday = (startsAt.getUTCDay() + 6) % 7; const schedules = workplace ? await tx.workSchedule.findMany({ where: { workplaceId: workplace.id, weekday } }) : [];
+    if (localDate(startsAt) !== localDate(endsAt) || !schedules.some(s => minutes(localTime(startsAt)) >= minutes(s.startTime) && minutes(localTime(endsAt)) <= minutes(s.endTime))) throw new BookingError('OUTSIDE_WORKING_HOURS', 422, 'El horario está fuera de la jornada.');
+    if (await tx.scheduleBlock.findFirst({ where: { doctorProfileId: appointment.doctorProfileId, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } } })) throw new BookingError('APPOINTMENT_TIME_CONFLICT', 409, 'El horario seleccionado ya no está disponible.');
+    const updated = await tx.appointment.update({ where: { id: appointment.id }, data: { previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, startsAt, endsAt, startDatetime: startsAt, date: localDateTimeToUtc(localDate(startsAt), '00:00'), startTime: localTime(startsAt), endTime: localTime(endsAt) } });
+    await tx.appointmentChangeLog.create({ data: { appointmentId, changedByUserId: actorId, changeType: 'RESCHEDULED', previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, newStartsAt: startsAt, newEndsAt: endsAt, previousStatus: appointment.status, newStatus: appointment.status } }); return updated;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); } catch (error) { if (error instanceof BookingError) throw error; if (String(error).includes('Appointment_no_active_doctor_overlap') || String(error).includes('23P01')) throw new BookingError('APPOINTMENT_TIME_CONFLICT', 409, 'El horario seleccionado ya no está disponible.'); throw error; }
+}

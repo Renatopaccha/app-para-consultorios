@@ -52,4 +52,15 @@ describe('snapshot monetario con PostgreSQL real', () => {
     expect(results.map(r => r.status).sort()).toEqual([201, 409]);
     expect(await prisma.appointment.count({ where: { doctorProfileId: doctorId, startsAt: new Date('2026-08-03T14:00:00.000Z') } })).toBe(1);
   });
+
+  it('cancela y reprograma con historial real sin alterar snapshots', async () => {
+    const service = await prisma.service.create({ data: { name: 'Reprogramable', price: 20, priceCents: 2000, duration: 30, doctorProfileId: doctorId } });
+    const created = await request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send({ doctorId, clinicId, serviceId: service.id, startsAt: '2026-08-04T09:00:00-05:00', paymentMethod: 'CASH' }).expect(201);
+    const moved = await request(app).patch(`/api/bookings/${created.body.id}/reschedule`).set('Authorization', `Bearer ${patientToken}`).send({ startsAt: '2026-08-04T10:00:00-05:00' }).expect(200);
+    expect(moved.body).toMatchObject({ servicePriceCentsSnapshot: 2000, startTime: '10:00' });
+    expect(await prisma.appointmentChangeLog.count({ where: { appointmentId: created.body.id, changeType: 'RESCHEDULED' } })).toBe(1);
+    await request(app).patch(`/api/bookings/${created.body.id}/cancel`).set('Authorization', `Bearer ${patientToken}`).send({ reason: 'Prueba' }).expect(200);
+    expect(await prisma.appointment.findUnique({ where: { id: created.body.id } })).toMatchObject({ status: 'CANCELLED', cancelledByUserId: patientId });
+    expect(await prisma.appointmentChangeLog.count({ where: { appointmentId: created.body.id, changeType: 'CANCELLED' } })).toBe(1);
+  });
 });

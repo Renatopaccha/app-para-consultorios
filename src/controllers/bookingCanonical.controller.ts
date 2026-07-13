@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../prisma';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { BookingError, createAppointment } from '../services/appointmentBooking.service';
+import { cancelAppointment, rescheduleAppointment } from '../services/appointmentBooking.service';
 import { localDateTimeToUtc, localDate, localTime, minutes } from '../utils/scheduling';
 
 function respond(error: unknown, res: Response) {
@@ -26,3 +27,5 @@ export async function getAvailability(req: AuthRequest, res: Response) {
     return res.json({ date: requestedDate, timezone: 'America/Guayaquil', serviceDurationMinutes: service.duration, slots });
   } catch (error) { return respond(error, res); }
 }
+export async function cancelCanonical(req: AuthRequest, res: Response) { if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' }); try { return res.json(await cancelAppointment(String(req.params.id), req.user.id, typeof req.body.reason === 'string' ? req.body.reason : undefined)); } catch (error) { return respond(error, res); } }
+export async function rescheduleCanonical(req: AuthRequest, res: Response) { if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' }); try { return res.json(await rescheduleAppointment(String(req.params.id), req.user.id, req.body.startsAt)); } catch (error) { return respond(error, res); } }

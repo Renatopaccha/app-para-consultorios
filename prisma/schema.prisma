@@ -60,6 +60,13 @@ enum Currency {
   USD
 }
 
+enum AppointmentChangeType {
+  CREATED
+  RESCHEDULED
+  CANCELLED
+  STATUS_CHANGED
+}
+
 // ---------------------------------------------------------------------------
 // 1. MODELO CENTRAL: USER Y SEGURIDAD
 // ---------------------------------------------------------------------------
@@ -301,17 +308,19 @@ model Appointment {
   clinicProfileId String
   serviceId       String
 
-  date             DateTime
-  startTime        String
-  endTime          String
-  startDatetime    DateTime?         @db.Timestamptz // Fecha y hora con zona horaria integrada
-  startsAt         DateTime?         @db.Timestamptz(3)
-  endsAt           DateTime?         @db.Timestamptz(3)
-  previousStartsAt DateTime?         @db.Timestamptz(3)
-  previousEndsAt   DateTime?         @db.Timestamptz(3)
-  status           AppointmentStatus @default(PENDING)
-  appointmentType  AppointmentType   @default(IN_PERSON)
-  notes            String?
+  date              DateTime
+  startTime         String
+  endTime           String
+  startDatetime     DateTime?         @db.Timestamptz // Fecha y hora con zona horaria integrada
+  startsAt          DateTime?         @db.Timestamptz(3)
+  endsAt            DateTime?         @db.Timestamptz(3)
+  previousStartsAt  DateTime?         @db.Timestamptz(3)
+  previousEndsAt    DateTime?         @db.Timestamptz(3)
+  cancelledAt       DateTime?         @db.Timestamptz(3)
+  cancelledByUserId String?
+  status            AppointmentStatus @default(PENDING)
+  appointmentType   AppointmentType   @default(IN_PERSON)
+  notes             String?
 
   // Pagos
   paymentMethod                  String        @default("NONE")
@@ -342,11 +351,12 @@ model Appointment {
   outlookEventId String?
 
   // Relaciones
-  patient       User          @relation("PatientAppointments", fields: [patientId], references: [id])
-  doctorProfile DoctorProfile @relation(fields: [doctorProfileId], references: [id])
-  clinicProfile ClinicProfile @relation(fields: [clinicProfileId], references: [id])
-  service       Service       @relation(fields: [serviceId], references: [id])
+  patient       User                   @relation("PatientAppointments", fields: [patientId], references: [id])
+  doctorProfile DoctorProfile          @relation(fields: [doctorProfileId], references: [id])
+  clinicProfile ClinicProfile          @relation(fields: [clinicProfileId], references: [id])
+  service       Service                @relation(fields: [serviceId], references: [id])
   review        Review?
+  changeLogs    AppointmentChangeLog[]
 
   @@index([patientId])
   @@index([doctorProfileId])
@@ -355,6 +365,24 @@ model Appointment {
   @@index([date])
   @@index([status])
   @@index([startsAt])
+}
+
+model AppointmentChangeLog {
+  id               String                @id @default(uuid())
+  appointmentId    String
+  changedByUserId  String
+  changeType       AppointmentChangeType
+  previousStartsAt DateTime?             @db.Timestamptz(3)
+  previousEndsAt   DateTime?             @db.Timestamptz(3)
+  newStartsAt      DateTime?             @db.Timestamptz(3)
+  newEndsAt        DateTime?             @db.Timestamptz(3)
+  previousStatus   AppointmentStatus?
+  newStatus        AppointmentStatus?
+  reason           String?
+  createdAt        DateTime              @default(now())
+  appointment      Appointment           @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId, createdAt])
 }
 
 model ScheduleBlock {

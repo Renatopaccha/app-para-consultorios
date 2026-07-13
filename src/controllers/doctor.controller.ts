@@ -5,6 +5,7 @@ import { centsToDollars, dollarsToCents } from '../utils/money';
 import { buildServiceSnapshot } from '../services/serviceSnapshot.service';
 import { emailService } from '../services/email.service';
 import bcrypt from 'bcrypt';
+import { createAppointment } from '../services/appointmentBooking.service';
 
 export const getDoctors = async (req: Request, res: Response) => {
   try {
@@ -395,6 +396,7 @@ export const addAppointment = async (req: AuthRequest, res: Response) => {
     if (!clinicId || !date || !startTime || !endTime) {
       return res.status(400).json({ error: 'Faltan campos obligatorios' });
     }
+    if (type !== 'cita') return res.status(422).json({ error: 'Usa /api/schedule-blocks para bloquear agenda.' });
 
     let finalPatientId = patientId;
     let finalServiceId = serviceId;
@@ -453,23 +455,7 @@ export const addAppointment = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'patientId y serviceId son obligatorios para citas médicas' });
     }
 
-    const service = await prisma.service.findUnique({ where: { id: finalServiceId } });
-    if (!service) return res.status(404).json({ error: 'Servicio no encontrado' });
-    const snapshot = buildServiceSnapshot(service);
-    const appointment = await prisma.appointment.create({
-      data: {
-        patientId: finalPatientId,
-        doctorProfileId: doctor.id,
-        clinicProfileId: clinicId,
-        serviceId: finalServiceId,
-        date: new Date(date),
-        startTime,
-        endTime,
-        status: type === 'cita' ? 'CONFIRMED' : 'PENDING',
-        notes: title || type
-        ,...snapshot
-      }
-    });
+    const appointment = await createAppointment({ patientUserId: finalPatientId, doctorId: doctor.id, clinicId, serviceId: finalServiceId, requestedStart: `${date}T${startTime}`, paymentMethod: 'NONE' });
 
     if (type === 'cita') {
       try {
