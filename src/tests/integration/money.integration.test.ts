@@ -16,7 +16,8 @@ describe('snapshot monetario con PostgreSQL real', () => {
     ]);
     const doctor = await prisma.doctorProfile.create({ data: { userId: doctorUser.id, licenseNumber: 'MONEY-001', consultationPrice: 0, verificationStatus: 'APPROVED', isVerified: true } });
     const clinic = await prisma.clinicProfile.create({ data: { userId: clinicUser.id, name: 'Clinic Money', address: 'Test', verificationStatus: 'APPROVED' } });
-    await prisma.doctorClinicWorkplace.create({ data: { doctorProfileId: doctor.id, clinicProfileId: clinic.id } });
+    const workplace = await prisma.doctorClinicWorkplace.create({ data: { doctorProfileId: doctor.id, clinicProfileId: clinic.id } });
+    await prisma.workSchedule.createMany({ data: Array.from({ length: 7 }, (_, weekday) => ({ workplaceId: workplace.id, weekday, startTime: '08:00', endTime: '18:00' })) });
     doctorId = doctor.id; clinicId = clinic.id; patientId = patient.id;
     doctorToken = generateToken({ id: doctorUser.id, role: 'DOCTOR' }); patientToken = generateToken({ id: patient.id, role: 'PATIENT' });
   });
@@ -42,5 +43,13 @@ describe('snapshot monetario con PostgreSQL real', () => {
     const service = await prisma.service.create({ data: { name: 'Ajeno', price: 10, priceCents: 1000, duration: 30, doctorProfileId: otherDoctor.id } });
     await request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`)
       .send({ doctorId, clinicId, serviceId: service.id, date: '2026-08-02', startTime: '09:00', paymentMethod: 'CASH' }).expect(403);
+  });
+
+  it('permite una sola reserva simultánea para el mismo intervalo', async () => {
+    const service = await prisma.service.create({ data: { name: 'Concurrente', price: 10, priceCents: 1000, duration: 30, doctorProfileId: doctorId } });
+    const body = { doctorId, clinicId, serviceId: service.id, startsAt: '2026-08-03T09:00:00-05:00', paymentMethod: 'CASH' };
+    const results = await Promise.all([request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send(body), request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send(body)]);
+    expect(results.map(r => r.status).sort()).toEqual([201, 409]);
+    expect(await prisma.appointment.count({ where: { doctorProfileId: doctorId, startsAt: new Date('2026-08-03T14:00:00.000Z') } })).toBe(1);
   });
 });

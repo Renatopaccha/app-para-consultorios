@@ -157,6 +157,7 @@ model ClinicProfile {
   insurances        Insurance[]
   assistants        AssistantProfile[]
   services          Service[]
+  scheduleBlocks    ScheduleBlock[]
   invitations       Invitation[]            @relation("ClinicInvitations")
 
   @@index([latitude, longitude])
@@ -206,6 +207,7 @@ model DoctorProfile {
   insurances     Insurance[]
   assistants     AssistantProfile[]
   services       Service[]
+  scheduleBlocks ScheduleBlock[]
   certifications Certification[]
 
   @@index([isVerified])
@@ -299,13 +301,17 @@ model Appointment {
   clinicProfileId String
   serviceId       String
 
-  date            DateTime
-  startTime       String
-  endTime         String
-  startDatetime   DateTime?         @db.Timestamptz // Fecha y hora con zona horaria integrada
-  status          AppointmentStatus @default(PENDING)
-  appointmentType AppointmentType   @default(IN_PERSON)
-  notes           String?
+  date             DateTime
+  startTime        String
+  endTime          String
+  startDatetime    DateTime?         @db.Timestamptz // Fecha y hora con zona horaria integrada
+  startsAt         DateTime?         @db.Timestamptz(3)
+  endsAt           DateTime?         @db.Timestamptz(3)
+  previousStartsAt DateTime?         @db.Timestamptz(3)
+  previousEndsAt   DateTime?         @db.Timestamptz(3)
+  status           AppointmentStatus @default(PENDING)
+  appointmentType  AppointmentType   @default(IN_PERSON)
+  notes            String?
 
   // Pagos
   paymentMethod                  String        @default("NONE")
@@ -348,6 +354,25 @@ model Appointment {
   @@index([serviceId])
   @@index([date])
   @@index([status])
+  @@index([startsAt])
+}
+
+model ScheduleBlock {
+  id              String   @id @default(uuid())
+  doctorProfileId String
+  clinicProfileId String?
+  startsAt        DateTime @db.Timestamptz(3)
+  endsAt          DateTime @db.Timestamptz(3)
+  reason          String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  doctorProfile DoctorProfile  @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
+  clinicProfile ClinicProfile? @relation(fields: [clinicProfileId], references: [id], onDelete: Cascade)
+
+  @@index([doctorProfileId, startsAt])
+  @@index([clinicProfileId, startsAt])
 }
 
 model Review {

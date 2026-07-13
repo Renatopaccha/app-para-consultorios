@@ -1,0 +1,10 @@
+import { Response } from 'express';
+import prisma from '../prisma';
+import { AuthRequest } from '../middlewares/auth.middleware';
+import { parseRequestedStart } from '../utils/scheduling';
+
+export async function createScheduleBlock(req: AuthRequest, res: Response) {
+  try { if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' }); const { doctorId, clinicId, startsAt, endsAt, reason } = req.body; const start = parseRequestedStart(startsAt); const end = parseRequestedStart(endsAt); if (end <= start) return res.status(400).json({ error: 'INVALID_INTERVAL' }); const doctor = await prisma.doctorProfile.findUnique({ where: { id: doctorId } }); if (!doctor || (req.user.role === 'DOCTOR' && doctor.userId !== req.user.id)) return res.status(403).json({ error: 'FORBIDDEN' }); const block = await prisma.scheduleBlock.create({ data: { doctorProfileId: doctorId, clinicProfileId: clinicId || null, startsAt: start, endsAt: end, reason: typeof reason === 'string' ? reason : null, createdByUserId: req.user.id } }); return res.status(201).json(block); } catch { return res.status(400).json({ error: 'INVALID_BLOCK' }); }
+}
+export async function listScheduleBlocks(req: AuthRequest, res: Response) { const doctorId = String(req.query.doctorId || ''); if (!doctorId) return res.status(400).json({ error: 'INVALID_INPUT' }); return res.json(await prisma.scheduleBlock.findMany({ where: { doctorProfileId: doctorId }, orderBy: { startsAt: 'asc' } })); }
+export async function deleteScheduleBlock(req: AuthRequest, res: Response) { const block = await prisma.scheduleBlock.findUnique({ where: { id: String(req.params.id) } }); if (!block) return res.status(404).json({ error: 'NOT_FOUND' }); if (!req.user || (req.user.role === 'DOCTOR' && (await prisma.doctorProfile.findUnique({ where: { id: block.doctorProfileId } }))?.userId !== req.user.id)) return res.status(403).json({ error: 'FORBIDDEN' }); await prisma.scheduleBlock.delete({ where: { id: block.id } }); return res.status(204).send(); }
