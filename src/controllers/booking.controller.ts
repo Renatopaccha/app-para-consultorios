@@ -7,6 +7,7 @@ import { buildServiceSnapshot } from '../services/serviceSnapshot.service';
 import { syncAppointmentToCalendar, updateCalendarEventStatus, deleteCalendarEvent } from '../services/calendarSync.service';
 import { emailService } from '../services/email.service';
 import { canAccessAppointment } from '../services/appointmentAuthorization.service';
+import { getAppointmentCalendarPresentation } from '../services/appointmentCalendarPresentation.service';
 
 export const getAvailableSlots = async (req: Request, res: Response) => {
   try {
@@ -457,7 +458,8 @@ export const getAppointments = async (req: AuthRequest, res: Response) => {
     const appointments = await prisma.appointment.findMany({
       where: { doctorProfileId: doctor.id },
       include: {
-        patient: { select: { id: true, firstName: true, lastName: true } }
+        patient: { select: { id: true, firstName: true, lastName: true } },
+        turn: true
       }
     });
 
@@ -470,6 +472,11 @@ export const getAppointments = async (req: AuthRequest, res: Response) => {
         ...app,
         patientId: app.patient.id,
         startDatetime: formattedDate,
+        appointmentStatus: app.status,
+        ...getAppointmentCalendarPresentation({ ...app, turnStatus: app.turn?.status }),
+        turnStatus: app.turn?.status || null,
+        turnNumber: app.turn?.turnNumber || null,
+        queueOrder: app.turn?.queueOrder || null,
       };
     });
 

@@ -1,0 +1,14 @@
+import { Response } from 'express';
+import { AuthRequest } from '../middlewares/auth.middleware';
+import { BookingError } from '../services/appointmentBooking.service';
+import * as lifecycle from '../services/appointmentLifecycle.service';
+const actor = (req: AuthRequest) => ({ id: req.user!.id, role: req.user!.role });
+const handle = (error: unknown, res: Response) => error instanceof BookingError ? res.status(error.status).json({ error: error.code, message: error.message }) : res.status(500).json({ error: 'INTERNAL_ERROR' });
+export const checkIn = async (req: AuthRequest, res: Response) => { try { return res.json(await lifecycle.checkInAppointment(String(req.params.id), actor(req))); } catch (e) { return handle(e,res); } };
+export const start = async (req: AuthRequest, res: Response) => { try { return res.json(await lifecycle.startAppointment(String(req.params.id), actor(req))); } catch (e) { return handle(e,res); } };
+export const complete = async (req: AuthRequest, res: Response) => { try { return res.json(await lifecycle.completeAppointment(String(req.params.id), actor(req))); } catch (e) { return handle(e,res); } };
+export const noShow = async (req: AuthRequest, res: Response) => { try { return res.json(await lifecycle.markAppointmentNoShow(String(req.params.id), actor(req))); } catch (e) { return handle(e,res); } };
+export const today = async (req: AuthRequest, res: Response) => { try { return res.json(await lifecycle.getTodayTurns(actor(req))); } catch (e) { return handle(e,res); } };
+export const call = async (req: AuthRequest, res: Response) => { try { return res.json(await lifecycle.callTurn(String(req.params.id), actor(req))); } catch (e) { return handle(e,res); } };
+export const delay = async (req: AuthRequest, res: Response) => { try { return res.json(await lifecycle.delayTurn(String(req.params.id), actor(req))); } catch (e) { return handle(e,res); } };
+export const completeTurn = async (req: AuthRequest, res: Response) => { try { return res.json(await lifecycle.completeTurn(String(req.params.id), actor(req))); } catch (e) { return handle(e,res); } };

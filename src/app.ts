@@ -18,6 +18,7 @@ import assistantRoutes from './routes/assistant.routes';
 import profileRoutes from './routes/profile.routes';
 import adminRoutes from './routes/admin.routes';
 import scheduleBlockRoutes from './routes/scheduleBlock.routes';
+import turnRoutes from './routes/turn.routes';
 
 // Tareas programadas (Cron Jobs). They are not part of HTTP integration tests
 // and keeping them out prevents test processes from retaining cron handles.
@@ -64,6 +65,7 @@ app.use('/api/assistant', assistantRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/schedule-blocks', scheduleBlockRoutes);
+app.use('/api/turns', turnRoutes);
 
 const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   console.error('[API] Unhandled request error:', error instanceof Error ? error.message : error);

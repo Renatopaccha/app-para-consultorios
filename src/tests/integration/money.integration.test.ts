@@ -110,4 +110,27 @@ describe('snapshot monetario con PostgreSQL real', () => {
     const confirmed = await request(app).patch(`/api/bookings/${created.body.id}/confirm`).set('Authorization', `Bearer ${patientToken}`).send({}).expect(200);
     expect(confirmed.body).toMatchObject({ patientConfirmationStatus: 'CONFIRMED', paymentStatus: 'PENDING_CASH' });
   });
+
+  it('ejecuta check-in, turno, atención, complete y reseña verificada', async () => {
+    const service = await prisma.service.create({ data: { name: 'Ciclo operativo', price: 20, priceCents: 2000, duration: 30, doctorProfileId: doctorId } });
+    const created = await request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send({ doctorId, clinicId, serviceId: service.id, startsAt: '2026-08-09T09:00:00-05:00', paymentMethod: 'CASH' }).expect(201);
+    await request(app).patch(`/api/bookings/${created.body.id}/confirm`).set('Authorization', `Bearer ${patientToken}`).send({}).expect(200);
+    const checked = await request(app).patch(`/api/bookings/${created.body.id}/check-in`).set('Authorization', `Bearer ${patientToken}`).send({}).expect(200);
+    expect(checked.body.turn).toMatchObject({ turnNumber: 1, queueOrder: 1, status: 'WAITING' });
+    await request(app).patch(`/api/turns/${checked.body.turn.id}/call`).set('Authorization', `Bearer ${doctorToken}`).send({}).expect(200);
+    await request(app).patch(`/api/bookings/${created.body.id}/start`).set('Authorization', `Bearer ${doctorToken}`).send({}).expect(200);
+    const completed = await request(app).patch(`/api/bookings/${created.body.id}/complete`).set('Authorization', `Bearer ${doctorToken}`).send({}).expect(200);
+    expect(completed.body).toMatchObject({ status: 'COMPLETED', paymentStatus: 'PENDING_CASH' });
+    await request(app).post('/api/reviews').set('Authorization', `Bearer ${patientToken}`).send({ appointmentId: created.body.id, rating: 5, comment: 'Excelente' }).expect(201);
+    expect(await prisma.appointmentTurn.findUnique({ where: { appointmentId: created.body.id } })).toMatchObject({ status: 'COMPLETED' });
+  });
+
+  it('no-show marca cita y turno como inasistencia y no habilita reseña', async () => {
+    const service = await prisma.service.create({ data: { name: 'No show', price: 20, priceCents: 2000, duration: 30, doctorProfileId: doctorId } });
+    const created = await request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send({ doctorId, clinicId, serviceId: service.id, startsAt: '2026-08-10T09:00:00-05:00', paymentMethod: 'CASH' }).expect(201);
+    await request(app).patch(`/api/bookings/${created.body.id}/check-in`).set('Authorization', `Bearer ${patientToken}`).send({}).expect(200);
+    await request(app).patch(`/api/bookings/${created.body.id}/no-show`).set('Authorization', `Bearer ${doctorToken}`).send({}).expect(200);
+    await request(app).post('/api/reviews').set('Authorization', `Bearer ${patientToken}`).send({ appointmentId: created.body.id, rating: 5 }).expect(400);
+    expect(await prisma.appointmentTurn.findUnique({ where: { appointmentId: created.body.id } })).toMatchObject({ status: 'MISSED' });
+  });
 });
