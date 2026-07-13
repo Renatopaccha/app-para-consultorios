@@ -15,9 +15,27 @@ const roleTranslations: Record<string, string> = {
   SUPER_ADMIN: 'administrador principal'
 };
 
+export type InvitationEmail = { to: string; role: string; token: string; expiresAt: Date };
+export type InvitationEmailAdapter = (email: InvitationEmail) => Promise<void>;
+
+// Integration tests use this in-memory adapter; production always calls Resend.
+let invitationEmailAdapter: InvitationEmailAdapter | undefined;
+
+export function setInvitationEmailAdapterForTests(adapter: InvitationEmailAdapter | undefined): void {
+  if (process.env.NODE_ENV !== 'test') {
+    throw new Error('El adaptador de correo de pruebas solo está disponible en NODE_ENV=test.');
+  }
+  invitationEmailAdapter = adapter;
+}
+
 export const emailService = {
 
   async sendInvitationEmail(to: string, role: string, invitationToken: string, expiresAt: Date) {
+    if (invitationEmailAdapter) {
+      await invitationEmailAdapter({ to, role, token: invitationToken, expiresAt });
+      return;
+    }
+    if (process.env.NODE_ENV === 'test') return;
     const invitationUrl = `${process.env.INVITATION_ACCEPT_URL || 'http://localhost:5173/accept-invitation'}?token=${encodeURIComponent(invitationToken)}`;
     const accountType = role === 'DOCTOR' ? 'médico' : 'administrador de clínica';
     await resend.emails.send({

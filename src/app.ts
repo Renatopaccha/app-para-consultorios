@@ -18,11 +18,18 @@ import assistantRoutes from './routes/assistant.routes';
 import profileRoutes from './routes/profile.routes';
 import adminRoutes from './routes/admin.routes';
 
-// Tareas programadas (Cron Jobs)
-import './jobs/reminder.job';
+// Tareas programadas (Cron Jobs). They are not part of HTTP integration tests
+// and keeping them out prevents test processes from retaining cron handles.
+if (process.env.NODE_ENV !== 'test') {
+  require('./jobs/reminder.job');
+}
 
-// Cargar variables de entorno
-dotenv.config();
+// Cargar variables de entorno. Tests never load development configuration.
+if (process.env.NODE_ENV === 'test') {
+  dotenv.config({ path: '.env.test' });
+} else {
+  dotenv.config();
+}
 
 const app: Application = express();
 const allowedOrigins = (process.env.CORS_ORIGIN || '')

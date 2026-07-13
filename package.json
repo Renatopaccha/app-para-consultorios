@@ -4,8 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon --exec ts-node src/server.ts"
+    "test": "npm run test:unit",
+    "dev": "nodemon --exec ts-node src/server.ts",
+    "db:test:up": "docker compose -f docker-compose.test.yml up -d --wait",
+    "db:test:down": "docker compose -f docker-compose.test.yml down -v",
+    "db:test:migrate": "NODE_ENV=test prisma migrate deploy --config prisma/test.config.ts",
+    "test:unit": "jest --config jest.config.js --runInBand",
+    "test:integration": "NODE_ENV=test jest --config jest.integration.config.js --runInBand",
+    "test:all": "npm run test:unit && npm run test:integration"
   },
   "keywords": [],
   "author": "",

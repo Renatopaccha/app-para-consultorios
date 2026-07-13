@@ -6,7 +6,9 @@ import { acceptInvitation, validateInvitation } from '../controllers/invitation.
 const router = Router();
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 10,
+  // Keep the middleware active in integration tests while avoiding cross-test
+  // throttling from a shared local Supertest address.
+  limit: process.env.NODE_ENV === 'test' ? 1000 : 10,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: { error: 'Demasiados intentos. Intenta nuevamente más tarde.' },

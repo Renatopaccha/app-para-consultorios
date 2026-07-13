@@ -4,7 +4,7 @@ import { authenticate, requireRole } from '../middlewares/auth.middleware';
 import { createInvitation, listInvitations, resendInvitation, revokeInvitation, updateClinicVerification, updateDoctorVerification } from '../controllers/invitation.controller';
 
 const router = Router();
-const invitationLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Demasiados intentos de invitación.' } });
+const invitationLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: process.env.NODE_ENV === 'test' ? 1000 : 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Demasiados intentos de invitación.' } });
 
 router.use(authenticate);
 router.post('/invitations', requireRole(['SUPER_ADMIN', 'CLINIC_ADMIN']), invitationLimiter, createInvitation);
