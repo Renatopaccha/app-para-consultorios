@@ -1,0 +1,7 @@
+CREATE TYPE "TurnStatus" AS ENUM ('WAITING','CALLED','DELAYED','IN_PROGRESS','COMPLETED','MISSED');
+ALTER TABLE "Appointment" ADD COLUMN "checkedInAt" TIMESTAMPTZ(3), ADD COLUMN "startedAt" TIMESTAMPTZ(3), ADD COLUMN "completedAt" TIMESTAMPTZ(3), ADD COLUMN "noShowAt" TIMESTAMPTZ(3);
+CREATE TABLE "AppointmentTurn" (
+ "id" TEXT NOT NULL, "appointmentId" TEXT NOT NULL, "doctorProfileId" TEXT NOT NULL, "clinicProfileId" TEXT NOT NULL, "localDate" TEXT NOT NULL, "turnNumber" INTEGER NOT NULL, "queueOrder" INTEGER NOT NULL, "status" "TurnStatus" NOT NULL DEFAULT 'WAITING', "assignedAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "calledAt" TIMESTAMPTZ(3), "delayedAt" TIMESTAMPTZ(3), "startedAt" TIMESTAMPTZ(3), "completedAt" TIMESTAMPTZ(3), "createdAt" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMPTZ(3) NOT NULL,
+ CONSTRAINT "AppointmentTurn_pkey" PRIMARY KEY ("id"), CONSTRAINT "AppointmentTurn_appointmentId_key" UNIQUE ("appointmentId"), CONSTRAINT "AppointmentTurn_appointmentId_fkey" FOREIGN KEY ("appointmentId") REFERENCES "Appointment"("id") ON DELETE CASCADE ON UPDATE CASCADE,
+ CONSTRAINT "AppointmentTurn_doctor_clinic_date_number_key" UNIQUE ("doctorProfileId","clinicProfileId","localDate","turnNumber"), CONSTRAINT "AppointmentTurn_doctor_clinic_date_order_key" UNIQUE ("doctorProfileId","clinicProfileId","localDate","queueOrder"));
+CREATE INDEX "AppointmentTurn_queue_idx" ON "AppointmentTurn"("doctorProfileId","clinicProfileId","localDate","status");

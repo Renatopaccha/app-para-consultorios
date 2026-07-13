@@ -74,6 +74,15 @@ enum PatientConfirmationStatus {
   EXPIRED
 }
 
+enum TurnStatus {
+  WAITING
+  CALLED
+  DELAYED
+  IN_PROGRESS
+  COMPLETED
+  MISSED
+}
+
 // ---------------------------------------------------------------------------
 // 1. MODELO CENTRAL: USER Y SEGURIDAD
 // ---------------------------------------------------------------------------
@@ -325,6 +334,10 @@ model Appointment {
   previousEndsAt    DateTime?         @db.Timestamptz(3)
   cancelledAt       DateTime?         @db.Timestamptz(3)
   cancelledByUserId String?
+  checkedInAt       DateTime?         @db.Timestamptz(3)
+  startedAt         DateTime?         @db.Timestamptz(3)
+  completedAt       DateTime?         @db.Timestamptz(3)
+  noShowAt          DateTime?         @db.Timestamptz(3)
   status            AppointmentStatus @default(PENDING)
   appointmentType   AppointmentType   @default(IN_PERSON)
   notes             String?
@@ -368,6 +381,7 @@ model Appointment {
   service       Service                @relation(fields: [serviceId], references: [id])
   review        Review?
   changeLogs    AppointmentChangeLog[]
+  turn          AppointmentTurn?
 
   @@index([patientId])
   @@index([doctorProfileId])
@@ -376,6 +390,29 @@ model Appointment {
   @@index([date])
   @@index([status])
   @@index([startsAt])
+}
+
+model AppointmentTurn {
+  id              String      @id @default(uuid())
+  appointmentId   String      @unique
+  doctorProfileId String
+  clinicProfileId String
+  localDate       String
+  turnNumber      Int
+  queueOrder      Int
+  status          TurnStatus  @default(WAITING)
+  assignedAt      DateTime    @default(now())
+  calledAt        DateTime?   @db.Timestamptz(3)
+  delayedAt       DateTime?   @db.Timestamptz(3)
+  startedAt       DateTime?   @db.Timestamptz(3)
+  completedAt     DateTime?   @db.Timestamptz(3)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  appointment     Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorProfileId, clinicProfileId, localDate, turnNumber])
+  @@unique([doctorProfileId, clinicProfileId, localDate, queueOrder])
+  @@index([doctorProfileId, clinicProfileId, localDate, status])
 }
 
 model AppointmentChangeLog {
