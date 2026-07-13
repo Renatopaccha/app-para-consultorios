@@ -4,6 +4,7 @@ import app from '../../app';
 import prisma, { disconnectPrisma } from '../../prisma';
 import { clearIntegrationDatabase, assertIntegrationDatabase } from './testDatabase';
 import { generateToken } from '../../utils/jwt';
+import { expirePendingConfirmations } from '../../services/appointmentConfirmation.service';
 
 describe('snapshot monetario con PostgreSQL real', () => {
   let doctorId = ''; let clinicId = ''; let patientId = ''; let doctorToken = ''; let patientToken = '';
@@ -132,5 +133,52 @@ describe('snapshot monetario con PostgreSQL real', () => {
     await request(app).patch(`/api/bookings/${created.body.id}/no-show`).set('Authorization', `Bearer ${doctorToken}`).send({}).expect(200);
     await request(app).post('/api/reviews').set('Authorization', `Bearer ${patientToken}`).send({ appointmentId: created.body.id, rating: 5 }).expect(400);
     expect(await prisma.appointmentTurn.findUnique({ where: { appointmentId: created.body.id } })).toMatchObject({ status: 'MISSED' });
+  });
+
+  it('las rutas legacy de asistente delegan el ciclo operativo, se deprecian y mantienen autorización', async () => {
+    const service = await prisma.service.create({ data: { name: 'Legacy assistant', price: 20, priceCents: 2000, duration: 30, doctorProfileId: doctorId } });
+    const assistantUser = await prisma.user.create({ data: { email: 'assistant.money@zenda.test', firstName: 'Assistant', lastName: 'Money', passwordHash: 'x', role: 'ASSISTANT' } });
+    await prisma.assistantProfile.create({ data: { userId: assistantUser.id, doctorProfileId: doctorId } });
+    const assistantToken = generateToken({ id: assistantUser.id, role: 'ASSISTANT' });
+    const created = await request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send({ doctorId, clinicId, serviceId: service.id, startsAt: '2026-08-11T09:00:00-05:00', paymentMethod: 'CASH' }).expect(201);
+    await request(app).patch(`/api/bookings/${created.body.id}/confirm`).set('Authorization', `Bearer ${patientToken}`).send({}).expect(200);
+    const postponed = await request(app).patch(`/api/assistant/${created.body.id}/postpone`).set('Authorization', `Bearer ${assistantToken}`).send({}).expect(200);
+    expect(postponed.headers.deprecation).toBe('true');
+    expect(postponed.body.turn).toMatchObject({ status: 'DELAYED' });
+    const started = await request(app).patch(`/api/assistant/${created.body.id}/start`).set('Authorization', `Bearer ${assistantToken}`).send({}).expect(200);
+    expect(started.headers.deprecation).toBe('true');
+    expect(started.body.appointment).toMatchObject({ status: 'IN_PROGRESS' });
+    const completed = await request(app).patch(`/api/assistant/${created.body.id}/complete`).set('Authorization', `Bearer ${assistantToken}`).send({}).expect(200);
+    expect(completed.headers.deprecation).toBe('true');
+    expect(completed.body.appointment).toMatchObject({ status: 'COMPLETED' });
+
+    const outsider = await prisma.user.create({ data: { email: 'outsider.money@zenda.test', firstName: 'Out', lastName: 'Sider', passwordHash: 'x', role: 'DOCTOR' } });
+    await prisma.doctorProfile.create({ data: { userId: outsider.id, licenseNumber: 'MONEY-OUT', consultationPrice: 0, verificationStatus: 'APPROVED', isVerified: true } });
+    await request(app).patch(`/api/assistant/${created.body.id}/missed`).set('Authorization', `Bearer ${generateToken({ id: outsider.id, role: 'DOCTOR' })}`).send({}).expect(403);
+  });
+
+  it('legacy missed delega a no-show y una reseña sigue prohibida', async () => {
+    const service = await prisma.service.create({ data: { name: 'Legacy missed', price: 20, priceCents: 2000, duration: 30, doctorProfileId: doctorId } });
+    const assistantUser = await prisma.user.create({ data: { email: 'assistant.missed@zenda.test', firstName: 'Assistant', lastName: 'Missed', passwordHash: 'x', role: 'ASSISTANT' } });
+    await prisma.assistantProfile.create({ data: { userId: assistantUser.id, doctorProfileId: doctorId } });
+    const created = await request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send({ doctorId, clinicId, serviceId: service.id, startsAt: '2026-08-12T09:00:00-05:00', paymentMethod: 'CASH' }).expect(201);
+    const missed = await request(app).patch(`/api/assistant/${created.body.id}/missed`).set('Authorization', `Bearer ${generateToken({ id: assistantUser.id, role: 'ASSISTANT' })}`).send({}).expect(200);
+    expect(missed.headers.deprecation).toBe('true');
+    expect(missed.body.appointment).toMatchObject({ status: 'MISSED' });
+    await request(app).post('/api/reviews').set('Authorization', `Bearer ${patientToken}`).send({ appointmentId: created.body.id, rating: 5 }).expect(400);
+  });
+
+  it('confirmación legacy y efectivo heredado se mantienen separados del estado clínico', async () => {
+    const service = await prisma.service.create({ data: { name: 'Legacy cash', price: 20, priceCents: 2000, duration: 30, doctorProfileId: doctorId } });
+    const created = await request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send({ doctorId, clinicId, serviceId: service.id, startsAt: '2026-08-13T09:00:00-05:00', paymentMethod: 'CASH' }).expect(201);
+    const confirmed = await request(app).patch(`/api/bookings/${created.body.id}/confirm-attendance`).set('Authorization', `Bearer ${patientToken}`).send({}).expect(200);
+    expect(confirmed.headers.deprecation).toBe('true');
+    expect(confirmed.body).toMatchObject({ patientConfirmationStatus: 'CONFIRMED', paymentStatus: 'PENDING_CASH', status: 'PENDING' });
+    const paid = await request(app).post('/api/bookings/verify-payment').set('Authorization', `Bearer ${doctorToken}`).send({ verificationCode: created.body.verificationCode }).expect(200);
+    expect(paid.headers.deprecation).toBe('true');
+    expect(paid.body.appointment).toMatchObject({ paymentStatus: 'PAID', status: 'PENDING', patientConfirmationStatus: 'CONFIRMED' });
+    await prisma.appointment.update({ where: { id: created.body.id }, data: { confirmationDeadlineAt: new Date('2020-01-01T00:00:00.000Z') } });
+    expect(await expirePendingConfirmations(new Date())).toBe(0);
+    expect(await prisma.appointment.findUniqueOrThrow({ where: { id: created.body.id } })).toMatchObject({ status: 'PENDING', patientConfirmationStatus: 'CONFIRMED', paymentStatus: 'PAID' });
   });
 });

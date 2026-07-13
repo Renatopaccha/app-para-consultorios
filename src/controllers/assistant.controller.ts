@@ -2,7 +2,20 @@ import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
 import { deleteCalendarEvent } from '../services/calendarSync.service';
-import { canAccessAppointment } from '../services/appointmentAuthorization.service';
+import { BookingError } from '../services/appointmentBooking.service';
+import { completeAppointment, markAppointmentNoShow, postponeAppointmentTurn, startAppointment } from '../services/appointmentLifecycle.service';
+
+const legacyActor = (req: AuthRequest) => ({ id: req.user!.id, role: req.user!.role });
+const legacyError = (error: unknown, res: Response) => {
+  if (error instanceof BookingError) return res.status(error.status).json({ error: error.code, message: error.message });
+  console.error('[Assistant Controller] Error en ruta heredada:', error);
+  return res.status(500).json({ error: 'INTERNAL_ERROR' });
+};
+
+function markDeprecated(res: Response, canonicalRoute: string) {
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Link', `<${canonicalRoute}>; rel="successor-version"`);
+}
 
 export const getAssistantDashboard = async (req: AuthRequest, res: Response) => {
   try {
@@ -89,127 +102,47 @@ export const getAssistantDashboard = async (req: AuthRequest, res: Response) => 
 
 export const startConsultation = async (req: AuthRequest, res: Response) => {
   try {
-    const id = req.params.id as string;
-    const appointment = await prisma.appointment.findUnique({ where: { id } });
-
-    if (!appointment) return res.status(404).json({ error: 'Cita no encontrada' });
-    const userId = req.user?.id;
-    const role = req.user?.role;
-    if (!userId || !role || !(await canAccessAppointment(userId, role, appointment))) {
-      return res.status(403).json({ error: 'No tienes permisos para modificar esta cita' });
-    }
-    if (appointment.status !== 'CONFIRMED') {
-      return res.status(400).json({ error: 'La cita debe estar confirmada para iniciar' });
-    }
-
-    const updated = await prisma.appointment.update({
-      where: { id },
-      data: { status: 'IN_PROGRESS' }
-    });
-
+    if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+    markDeprecated(res, '/api/bookings/:id/start');
+    const updated = await startAppointment(String(req.params.id), legacyActor(req));
     return res.status(200).json({ message: 'Consulta iniciada', appointment: updated });
   } catch (error) {
-    console.error('[Assistant Controller] Error en startConsultation:', error);
-    return res.status(500).json({ error: 'Error al iniciar consulta' });
+    return legacyError(error, res);
   }
 };
 
 export const completeConsultation = async (req: AuthRequest, res: Response) => {
   try {
-    const id = req.params.id as string;
-    const appointment = await prisma.appointment.findUnique({ where: { id } });
-
-    if (!appointment) return res.status(404).json({ error: 'Cita no encontrada' });
-    const userId = req.user?.id;
-    const role = req.user?.role;
-    if (!userId || !role || !(await canAccessAppointment(userId, role, appointment))) {
-      return res.status(403).json({ error: 'No tienes permisos para modificar esta cita' });
-    }
-    if (appointment.status !== 'IN_PROGRESS') {
-      return res.status(400).json({ error: 'La cita debe estar en progreso para completarse' });
-    }
-
-    const updated = await prisma.appointment.update({
-      where: { id },
-      data: { status: 'COMPLETED' }
-    });
-
+    if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+    markDeprecated(res, '/api/bookings/:id/complete');
+    const updated = await completeAppointment(String(req.params.id), legacyActor(req));
     return res.status(200).json({ message: 'Consulta completada', appointment: updated });
   } catch (error) {
-    console.error('[Assistant Controller] Error en completeConsultation:', error);
-    return res.status(500).json({ error: 'Error al completar consulta' });
+    return legacyError(error, res);
   }
 };
 
 export const markAsMissed = async (req: AuthRequest, res: Response) => {
   try {
-    const id = req.params.id as string;
-    const appointment = await prisma.appointment.findUnique({ where: { id } });
-
-    if (!appointment) return res.status(404).json({ error: 'Cita no encontrada' });
-    const userId = req.user?.id;
-    const role = req.user?.role;
-    if (!userId || !role || !(await canAccessAppointment(userId, role, appointment))) {
-      return res.status(403).json({ error: 'No tienes permisos para modificar esta cita' });
-    }
-
-    const updated = await prisma.appointment.update({
-      where: { id },
-      data: { status: 'MISSED' }
-    });
-
+    if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+    const id = String(req.params.id);
+    markDeprecated(res, '/api/bookings/:id/no-show');
+    const updated = await markAppointmentNoShow(id, legacyActor(req));
     deleteCalendarEvent(id).catch(console.error);
 
     return res.status(200).json({ message: 'Paciente marcado como no asistió', appointment: updated });
   } catch (error) {
-    console.error('[Assistant Controller] Error en markAsMissed:', error);
-    return res.status(500).json({ error: 'Error al marcar como no asistió' });
+    return legacyError(error, res);
   }
 };
 
 export const postponeTurn = async (req: AuthRequest, res: Response) => {
   try {
-    const id = req.params.id as string;
-    const appointment = await prisma.appointment.findUnique({ where: { id } });
-
-    if (!appointment) return res.status(404).json({ error: 'Cita no encontrada' });
-    const userId = req.user?.id;
-    const role = req.user?.role;
-    if (!userId || !role || !(await canAccessAppointment(userId, role, appointment))) {
-      return res.status(403).json({ error: 'No tienes permisos para modificar esta cita' });
-    }
-    if (appointment.status !== 'CONFIRMED') {
-      return res.status(400).json({ error: 'La cita debe estar confirmada para posponerse' });
-    }
-
-    // Calcular el inicio y fin del día para buscar el máximo turnNumber del doctor hoy
-    const appointmentDate = new Date(appointment.date);
-    const dateStr = appointmentDate.toISOString().split('T')[0];
-    const dateStart = new Date(`${dateStr}T00:00:00.000Z`);
-    const dateEnd = new Date(`${dateStr}T23:59:59.999Z`);
-
-    const maxTurnAgg = await prisma.appointment.aggregate({
-      _max: {
-        turnNumber: true
-      },
-      where: {
-        doctorProfileId: appointment.doctorProfileId,
-        date: { gte: dateStart, lte: dateEnd },
-        status: { not: 'CANCELLED' }
-      }
-    });
-
-    const maxTurn = maxTurnAgg._max.turnNumber || 0;
-    const newTurn = maxTurn + 1;
-
-    const updated = await prisma.appointment.update({
-      where: { id },
-      data: { turnNumber: newTurn }
-    });
-
-    return res.status(200).json({ message: 'Turno pospuesto exitosamente', appointment: updated });
+    if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+    markDeprecated(res, '/api/turns/:id/delay');
+    const turn = await postponeAppointmentTurn(String(req.params.id), legacyActor(req));
+    return res.status(200).json({ message: 'Turno pospuesto exitosamente', turn });
   } catch (error) {
-    console.error('[Assistant Controller] Error en postponeTurn:', error);
-    return res.status(500).json({ error: 'Error al posponer turno' });
+    return legacyError(error, res);
   }
 };

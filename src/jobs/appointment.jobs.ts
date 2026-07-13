@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import prisma from '../prisma';
 import { emailService } from '../services/email.service';
+import { expirePendingConfirmations } from '../services/appointmentConfirmation.service';
 
 export const startCronJobs = () => {
   console.log('[Cron Jobs] Inicializando el vigilante de citas...');
@@ -54,47 +55,11 @@ export const startCronJobs = () => {
     }
   });
 
-  // Job 2 (Cancelador 12h): Se ejecuta al minuto 0 de cada hora
+  // Job 2: compatibility scheduler. Confirmation deadline is canonical; payment never cancels a booking.
   cron.schedule('0 * * * *', async () => {
     try {
-      console.log('[Cron Job 2] Verificando citas en efectivo sin confirmar a 12h de su inicio...');
-
-      const now = new Date();
-      // Ventana: desde 12 horas a 13 horas en el futuro
-      const startWindow = new Date(now.getTime() + 12 * 60 * 60 * 1000);
-      const endWindow = new Date(now.getTime() + 13 * 60 * 60 * 1000);
-
-      const appointmentsToCancel = await prisma.appointment.findMany({
-        where: {
-          date: {
-            gte: startWindow,
-            lt: endWindow
-          },
-          paymentMethod: 'CASH',
-          status: 'PENDING' // Nuestro equivalente a PENDING_CONFIRMATION
-        },
-        include: {
-          patient: true,
-          doctorProfile: {
-            include: { user: true }
-          }
-        }
-      });
-
-      for (const appt of appointmentsToCancel) {
-        const patientEmail = appt.patient.email;
-        const doctorName = `${appt.doctorProfile.user.firstName} ${appt.doctorProfile.user.lastName}`;
-
-        // Cancelar cita automáticamente y liberar la agenda
-        await prisma.appointment.update({
-          where: { id: appt.id },
-          data: { status: 'CANCELLED' }
-        });
-
-        // Notificar al paciente de la cancelación
-        await emailService.sendCancellationNoticeEmail(patientEmail, doctorName, appt.startTime);
-        console.log(`[Cron Job 2] Cita cancelada automáticamente para el paciente ${patientEmail}`);
-      }
+      const expired = await expirePendingConfirmations(new Date());
+      if (expired) console.log(`[Cron Job 2] ${expired} cita(s) expirada(s) por falta de confirmación.`);
     } catch (error) {
       console.error('[Cron Job 2] Error ejecutando cancelador de 12h:', error);
     }

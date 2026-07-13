@@ -31,7 +31,7 @@ export const syncAppointmentToCalendar = async (appointmentId: string): Promise<
     let eventTitle = `Cita Zenda - ${appointment.patient.firstName} ${appointment.patient.lastName}`;
     
     if (appointment.paymentStatus === 'PENDING_CASH') {
-      if (appointment.isPatientConfirmed) {
+      if (appointment.patientConfirmationStatus === 'CONFIRMED') {
         eventTitle = `Asistencia Confirmada (Falta Pago Efectivo) - ${appointment.patient.firstName} ${appointment.patient.lastName}`;
       } else {
         eventTitle = `Reserva - Falta confirmar asistencia (Pago Pendiente) - ${appointment.patient.firstName} ${appointment.patient.lastName}`;
@@ -112,7 +112,7 @@ export const updateCalendarEventStatus = async (appointmentId: string): Promise<
     let newTitle = `Cita Zenda - ${appointment.patient.firstName} ${appointment.patient.lastName}`;
     
     if (appointment.paymentStatus === 'PENDING_CASH') {
-      if (appointment.isPatientConfirmed) {
+      if (appointment.patientConfirmationStatus === 'CONFIRMED') {
         newTitle = `Asistencia Confirmada (Falta Pago Efectivo) - ${appointment.patient.firstName} ${appointment.patient.lastName}`;
       } else {
         newTitle = `Reserva - Falta confirmar asistencia (Pago Pendiente) - ${appointment.patient.firstName} ${appointment.patient.lastName}`;

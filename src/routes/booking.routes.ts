@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getAvailableSlots, bookAppointment, verifyCashPayment, cancelAppointmentByPatient, confirmPatientAttendance, getAppointments, getAppointmentById, updateBookingStatus } from '../controllers/booking.controller';
 import { authenticate, requireRole } from '../middlewares/auth.middleware';
-import { bookCanonical, getAvailability, cancelCanonical, rescheduleCanonical, confirmCanonical } from '../controllers/bookingCanonical.controller';
+import { bookCanonical, getAvailability, cancelCanonical, rescheduleCanonical, confirmAttendanceLegacy, confirmCanonical } from '../controllers/bookingCanonical.controller';
 import { checkIn, start, complete, noShow } from '../controllers/appointmentLifecycle.controller';
 
 const router = Router();
@@ -18,7 +18,7 @@ router.patch('/:id/check-in', authenticate, checkIn);
 router.patch('/:id/start', authenticate, requireRole(['DOCTOR','CLINIC_ADMIN','ASSISTANT','SUPER_ADMIN']), start);
 router.patch('/:id/complete', authenticate, requireRole(['DOCTOR','CLINIC_ADMIN','ASSISTANT','SUPER_ADMIN']), complete);
 router.patch('/:id/no-show', authenticate, requireRole(['DOCTOR','CLINIC_ADMIN','ASSISTANT','SUPER_ADMIN']), noShow);
-router.patch('/:id/confirm-attendance', authenticate, requireRole(['PATIENT']), confirmCanonical);
+router.patch('/:id/confirm-attendance', authenticate, requireRole(['PATIENT']), confirmAttendanceLegacy);
 router.patch('/:id/status', authenticate, requireRole(['DOCTOR', 'CLINIC_ADMIN', 'SUPER_ADMIN']), updateBookingStatus);
 
 // Rutas de lectura de citas (ahora protegidas y unificadas)

@@ -1,13 +1,17 @@
 import { Request, Response } from 'express';
-import crypto from 'crypto';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
-import { createAppointment } from '../services/appointmentBooking.service';
-import { buildServiceSnapshot } from '../services/serviceSnapshot.service';
+import { BookingError, cancelAppointment, createAppointment } from '../services/appointmentBooking.service';
 import { syncAppointmentToCalendar, updateCalendarEventStatus, deleteCalendarEvent } from '../services/calendarSync.service';
-import { emailService } from '../services/email.service';
 import { canAccessAppointment } from '../services/appointmentAuthorization.service';
 import { getAppointmentCalendarPresentation } from '../services/appointmentCalendarPresentation.service';
+import { confirmPatientAppointment } from '../services/appointmentConfirmation.service';
+import { completeAppointment, markAppointmentNoShow, startAppointment } from '../services/appointmentLifecycle.service';
+import { confirmLegacyCashPayment } from '../services/legacyCashPayment.service';
+
+const legacyActor = (req: AuthRequest) => ({ id: req.user!.id, role: req.user!.role });
+function deprecated(res: Response, canonicalRoute: string) { res.setHeader('Deprecation', 'true'); res.setHeader('Link', `<${canonicalRoute}>; rel="successor-version"`); }
+function domainError(error: unknown, res: Response) { if (error instanceof BookingError) return res.status(error.status).json({ error: error.code, message: error.message }); console.error('[Booking Controller]', error); return res.status(500).json({ error: 'INTERNAL_ERROR' }); }
 
 export const getAvailableSlots = async (req: Request, res: Response) => {
   try {
@@ -144,204 +148,26 @@ export const getAvailableSlots = async (req: Request, res: Response) => {
 
 export const bookAppointment = async (req: AuthRequest, res: Response) => {
   try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'No autorizado' });
-
-    const { doctorId, clinicId, serviceId, date, startTime, paymentMethod, isRevision } = req.body;
-
-    if (!doctorId || !clinicId || !serviceId || !date || !startTime || !paymentMethod) {
-      return res.status(400).json({ error: 'Faltan parámetros requeridos' });
-    }
-
-    // Paso A: Obtener datos base
-    const [service, patient, doctor] = await Promise.all([
-      prisma.service.findUnique({ where: { id: serviceId } }),
-      prisma.user.findUnique({ where: { id: userId } }),
-      prisma.doctorProfile.findUnique({ where: { id: doctorId }, include: { user: true } })
-    ]);
-
-    if (!service) return res.status(404).json({ error: 'Servicio no encontrado' });
-    if (!patient) return res.status(404).json({ error: 'Paciente no encontrado' });
-    if (!doctor || !doctor.user) return res.status(404).json({ error: 'Doctor no encontrado' });
-    if (doctor.verificationStatus !== 'APPROVED') return res.status(404).json({ error: 'Doctor no disponible' });
-
-    if (service.doctorProfileId !== doctorId && service.clinicProfileId !== clinicId) return res.status(403).json({ error: 'El servicio no pertenece al médico o clínica seleccionados.' });
-    const snapshot = buildServiceSnapshot(service);
-    const durationMinutes = snapshot.serviceDurationMinutesSnapshot;
-    const priceCents = snapshot.servicePriceCentsSnapshot;
-
-    const timeToMinutes = (timeString: string) => {
-      const parts = timeString.split(':');
-      const hours = Number(parts[0]) || 0;
-      const minutes = Number(parts[1]) || 0;
-      return hours * 60 + minutes;
-    };
-
-    const minutesToTime = (totalMinutes: number) => {
-      const hours = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
-      const minutes = (totalMinutes % 60).toString().padStart(2, '0');
-      return `${hours}:${minutes}`;
-    };
-
-    const startMins = timeToMinutes(startTime);
-    const endTime = minutesToTime(startMins + durationMinutes);
-
-    // Paso B: Validación de solapamiento
-    const dateStart = new Date(`${date}T00:00:00.000Z`);
-    const dateEnd = new Date(`${date}T23:59:59.999Z`);
-
-    const existingAppointments = await prisma.appointment.findMany({
-      where: {
-        doctorProfileId: doctorId,
-        clinicProfileId: clinicId,
-        date: { gte: dateStart, lte: dateEnd },
-        status: { in: ['PENDING', 'CONFIRMED'] }
-      }
-    });
-
-    const isOverlapping = existingAppointments.some(appt => {
-      const apptMinsStart = timeToMinutes(appt.startTime);
-      const apptMinsEnd = timeToMinutes(appt.endTime);
-      return (startMins < apptMinsEnd) && ((startMins + durationMinutes) > apptMinsStart);
-    });
-
-    if (isOverlapping) {
-      return res.status(409).json({ error: 'El horario seleccionado ya no está disponible.' });
-    }
-
-    // Paso C: Lógica de Negocio
-    let finalPaymentMethod = paymentMethod;
-    let finalPaymentStatus = 'PENDING_CASH';
-    let finalStatus = 'PENDING'; // Mapeamos 'PENDING_CONFIRMATION' a 'PENDING'
-    let verificationCode: string | null = null;
-
-    if (isRevision === true || priceCents === 0) {
-      finalPaymentMethod = 'NONE';
-      finalPaymentStatus = 'PAID';
-      finalStatus = 'CONFIRMED';
-      verificationCode = null;
-    } else if (paymentMethod === 'CARD') {
-      finalPaymentStatus = 'PAID';
-      finalStatus = 'CONFIRMED'; // Simulamos éxito por ahora
-    } else if (paymentMethod === 'CASH') {
-      finalPaymentStatus = 'PENDING_CASH';
-      finalStatus = 'PENDING';
-      verificationCode = crypto.randomBytes(3).toString('hex').toUpperCase();
-    }
-
-    // Paso D: Asignación Cronológica de Turnos
-    const appointmentDate = new Date(`${date}T12:00:00Z`);
-
-    // Obtenemos todas las citas del día para este doctor, ordenadas cronológicamente
-    const existingAppointmentsTurn = await prisma.appointment.findMany({
-      where: {
-        doctorProfileId: doctorId,
-        date: appointmentDate,
-        status: { not: 'CANCELLED' }
-      },
-      orderBy: { startTime: 'asc' }
-    });
-
-    let turnNumber = 1;
-    for (const appt of existingAppointmentsTurn) {
-      if (timeToMinutes(startTime) >= timeToMinutes(appt.startTime)) {
-        turnNumber++;
-      }
-    }
-
-    // Desplazamos el turno +1 para todas las citas posteriores
-    await prisma.appointment.updateMany({
-      where: {
-        doctorProfileId: doctorId,
-        date: appointmentDate,
-        startTime: { gte: startTime },
-        status: { not: 'CANCELLED' },
-        turnNumber: { not: null }
-      },
-      data: {
-        turnNumber: { increment: 1 }
-      }
-    });
-
-    // Paso E: Crear Cita
-
-    const appointment = await createAppointment({ patientUserId: userId, doctorId, clinicId, serviceId, requestedStart: `${date}T${startTime}`, paymentMethod });
-
-    // Inyectamos el evento al calendario al momento de crear la reserva
+    if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+    deprecated(res, '/api/bookings/book');
+    const { doctorId, clinicId, serviceId, startsAt, date, startTime, paymentMethod } = req.body;
+    const requestedStart = startsAt || (date && startTime ? `${date}T${startTime}` : undefined);
+    const appointment = await createAppointment({ patientUserId: req.user.id, doctorId, clinicId, serviceId, requestedStart, paymentMethod });
     syncAppointmentToCalendar(appointment.id).catch(console.error);
-
-    // Correos Transaccionales Asíncronos
-    const patientName = patient.firstName || 'Paciente';
-    const doctorName = doctor.user.lastName ? `Dr/Dra. ${doctor.user.lastName}` : 'Especialista';
-    const formattedDate = appointmentDate.toISOString().split('T')[0] || '';
-
-    // A) Correo al Paciente
-    emailService.sendAppointmentConfirmation(
-      patient.email,
-      patientName,
-      doctorName,
-      formattedDate,
-      startTime,
-      turnNumber,
-      paymentMethod === 'CASH',
-      verificationCode
-    ).catch(console.error);
-
-    // B) Correo al Doctor
-    emailService.sendDoctorNewBooking(
-      doctor.user.email,
-      doctorName,
-      patientName,
-      formattedDate,
-      startTime,
-      service.name
-    ).catch(console.error);
-
-    res.status(201).json(appointment);
+    return res.status(201).json(appointment);
 
   } catch (error) {
-    console.error('[Booking Controller] Error en bookAppointment:', error);
-    res.status(500).json({ error: 'Error al agendar la cita' });
+    return domainError(error, res);
   }
 };
 
 export const verifyCashPayment = async (req: AuthRequest, res: Response) => {
   try {
     const { verificationCode } = req.body;
-
-    if (!verificationCode) {
-      return res.status(400).json({ error: 'El código de verificación es requerido' });
-    }
-
-    const appointment = await prisma.appointment.findUnique({
-      where: { verificationCode }
-    });
-
-    if (!appointment) {
-      return res.status(404).json({ error: 'Código inválido o no encontrado' });
-    }
-
-    const userId = req.user?.id;
-    const role = req.user?.role;
-    if (!userId || !role || !(await canAccessAppointment(userId, role, appointment))) {
-      return res.status(403).json({ error: 'No tienes permisos para verificar el pago de esta cita' });
-    }
-
-    if (appointment.paymentMethod !== 'CASH') {
-      return res.status(400).json({ error: 'Esta cita no está configurada para pago en efectivo' });
-    }
-
-    if (appointment.paymentStatus === 'PAID') {
-      return res.status(400).json({ error: 'Esta cita ya fue pagada' });
-    }
-
-    const updatedAppointment = await prisma.appointment.update({
-      where: { id: appointment.id },
-      data: {
-        paymentStatus: 'PAID',
-        verificationCode: null // Invalidamos el código por seguridad extrema
-      }
-    });
+    if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+    if (typeof verificationCode !== 'string' || !verificationCode) return res.status(400).json({ error: 'VERIFICATION_CODE_REQUIRED' });
+    deprecated(res, '/api/payments/cash (pending Payment module)');
+    const updatedAppointment = await confirmLegacyCashPayment(verificationCode, legacyActor(req));
 
     // Actualizamos el evento en el calendario para quitar el tag de "Pago Pendiente"
     updateCalendarEventStatus(updatedAppointment.id).catch(console.error);
@@ -352,8 +178,7 @@ export const verifyCashPayment = async (req: AuthRequest, res: Response) => {
     });
 
   } catch (error) {
-    console.error('[Booking Controller] Error en verifyCashPayment:', error);
-    res.status(500).json({ error: 'Error al verificar el pago' });
+    return domainError(error, res);
   }
 };
 
@@ -361,36 +186,9 @@ export const cancelAppointmentByPatient = async (req: AuthRequest, res: Response
   try {
     const appointmentId = req.params.id as string;
     const { cancellationReason } = req.body;
-    const userId = req.user?.id;
-
-    if (!userId) {
-      return res.status(401).json({ error: 'No autorizado' });
-    }
-
-    const appointment = await prisma.appointment.findUnique({
-      where: { id: appointmentId }
-    });
-
-    if (!appointment) {
-      return res.status(404).json({ error: 'Cita no encontrada' });
-    }
-
-    const role = req.user?.role;
-    if (!role || !(await canAccessAppointment(userId, role, appointment))) {
-      return res.status(403).json({ error: 'No tienes permisos para cancelar esta cita' });
-    }
-
-    if (appointment.status === 'CANCELLED') {
-      return res.status(400).json({ error: 'Esta cita ya ha sido cancelada previamente' });
-    }
-
-    const updatedAppointment = await prisma.appointment.update({
-      where: { id: appointmentId },
-      data: {
-        status: 'CANCELLED',
-        cancellationReason: cancellationReason || null
-      }
-    });
+    if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+    deprecated(res, '/api/bookings/:id/cancel');
+    const updatedAppointment = await cancelAppointment(appointmentId, req.user.id, typeof cancellationReason === 'string' ? cancellationReason : undefined);
 
     // Eliminamos el evento del calendario para liberar la agenda
     deleteCalendarEvent(appointmentId).catch(console.error);
@@ -401,37 +199,16 @@ export const cancelAppointmentByPatient = async (req: AuthRequest, res: Response
     });
 
   } catch (error) {
-    console.error('[Booking Controller] Error en cancelAppointmentByPatient:', error);
-    res.status(500).json({ error: 'Error al cancelar la cita' });
+    return domainError(error, res);
   }
 };
 
 export const confirmPatientAttendance = async (req: AuthRequest, res: Response) => {
   try {
     const appointmentId = req.params.id as string;
-    const userId = req.user?.id;
-
-    if (!userId) {
-      return res.status(401).json({ error: 'No autorizado' });
-    }
-
-    const appointment = await prisma.appointment.findUnique({
-      where: { id: appointmentId }
-    });
-
-    if (!appointment) {
-      return res.status(404).json({ error: 'Cita no encontrada' });
-    }
-
-    const role = req.user?.role;
-    if (!role || !(await canAccessAppointment(userId, role, appointment))) {
-      return res.status(403).json({ error: 'No tienes permisos para confirmar esta cita' });
-    }
-
-    const updatedAppointment = await prisma.appointment.update({
-      where: { id: appointmentId },
-      data: { isPatientConfirmed: true, status: 'CONFIRMED' }
-    });
+    if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+    deprecated(res, '/api/bookings/:id/confirm');
+    const updatedAppointment = await confirmPatientAppointment(appointmentId, req.user.id);
 
     // Actualizamos el evento en el calendario externo de forma asíncrona
     updateCalendarEventStatus(appointmentId).catch(console.error);
@@ -442,8 +219,7 @@ export const confirmPatientAttendance = async (req: AuthRequest, res: Response) 
     });
 
   } catch (error) {
-    console.error('[Booking Controller] Error en confirmPatientAttendance:', error);
-    res.status(500).json({ error: 'Error al confirmar asistencia' });
+    return domainError(error, res);
   }
 };
 
@@ -517,38 +293,16 @@ export const updateBookingStatus = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    const userId = req.user?.id;
-    const userRole = req.user?.role;
-
-    if (!status) {
-      return res.status(400).json({ error: 'El estado (status) es requerido' });
-    }
-
-    const validStatuses = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'MISSED'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: 'Estado no válido. Opciones permitidas: ' + validStatuses.join(', ') });
-    }
-
-    const appointment = await prisma.appointment.findUnique({
-      where: { id: id as string }
-    });
-
-    if (!appointment) {
-      return res.status(404).json({ error: 'Cita no encontrada' });
-    }
-
-    if (!userId || !userRole || !(await canAccessAppointment(userId, userRole, appointment))) {
-      return res.status(403).json({ error: 'No tienes permisos para modificar el estado de esta cita' });
-    }
-
-    const updatedAppointment = await prisma.appointment.update({
-      where: { id: id as string },
-      data: { status }
-    });
-
-    res.json({ message: 'Estado actualizado correctamente', appointment: updatedAppointment });
+    if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+    deprecated(res, 'Use /cancel, /start, /complete or /no-show according to the transition');
+    let appointment;
+    if (status === 'IN_PROGRESS') appointment = await startAppointment(String(id), legacyActor(req));
+    else if (status === 'COMPLETED') appointment = await completeAppointment(String(id), legacyActor(req));
+    else if (status === 'MISSED') appointment = await markAppointmentNoShow(String(id), legacyActor(req));
+    else if (status === 'CANCELLED') appointment = await cancelAppointment(String(id), req.user.id, typeof req.body.reason === 'string' ? req.body.reason : undefined);
+    else return res.status(422).json({ error: 'LEGACY_STATUS_TRANSITION_NOT_SUPPORTED', message: 'Usa la ruta canónica de confirmación, cancelación o ciclo operativo.' });
+    return res.json({ message: 'Estado actualizado correctamente', appointment });
   } catch (error) {
-    console.error('[Booking Controller] Error en updateBookingStatus:', error);
-    res.status(500).json({ error: 'Error al actualizar el estado de la cita' });
+    return domainError(error, res);
   }
 };
