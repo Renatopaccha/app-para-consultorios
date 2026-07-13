@@ -121,7 +121,7 @@ export const searchDoctorsAndClinics = async (req: Request, res: Response) => {
         user: { select: { id: true, firstName: true, lastName: true } },
         specialties: { select: { id: true, name: true } },
         insurances: { select: { id: true, name: true } },
-        services: { select: { id: true, name: true, description: true, price: true, duration: true } },
+        services: { select: { id: true, name: true, description: true, price: true, priceCents: true, currency: true, duration: true } },
         workplaces: {
           where: { isActive: true },
           include: { clinicProfile: { select: { id: true, name: true, address: true, logoUrl: true, latitude: true, longitude: true, color: true } } }

@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
+import { centsToDollars, dollarsToCents } from '../utils/money';
+import { buildServiceSnapshot } from '../services/serviceSnapshot.service';
 import { emailService } from '../services/email.service';
 import bcrypt from 'bcrypt';
 
@@ -40,7 +42,7 @@ export const getDoctors = async (req: Request, res: Response) => {
           }
         },
         specialties: { select: { id: true, name: true } },
-        services: { select: { id: true, name: true, description: true, price: true, duration: true } }
+        services: { select: { id: true, name: true, description: true, price: true, priceCents: true, currency: true, duration: true } }
       }
     });
     res.json(doctors);
@@ -75,7 +77,7 @@ export const getDoctorById = async (req: Request, res: Response) => {
           }
         },
         specialties: { select: { id: true, name: true } },
-        services: { select: { id: true, name: true, description: true, price: true, duration: true } }
+        services: { select: { id: true, name: true, description: true, price: true, priceCents: true, currency: true, duration: true } }
       }
     });
     if (!doctor) {
@@ -243,20 +245,28 @@ export const addService = async (req: AuthRequest, res: Response) => {
     const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
     if (!doctor) return res.status(404).json({ error: 'Perfil no encontrado' });
 
-    const { name, price, description, duration } = req.body;
-    if (!name) return res.status(400).json({ error: 'Faltan campos requeridos (name)' });
+    const { name, price, priceCents, description, duration } = req.body;
+    if (!name || (price === undefined && priceCents === undefined)) return res.status(400).json({ error: 'Faltan campos requeridos (name, price)' });
+    const canonicalPriceCents = priceCents !== undefined
+      ? (Number.isSafeInteger(priceCents) && priceCents >= 0 ? priceCents : null)
+      : dollarsToCents(price);
+    if (canonicalPriceCents === null || canonicalPriceCents > 100_000_000 || !Number.isInteger(Number(duration)) || Number(duration) <= 0) {
+      return res.status(400).json({ error: 'Precio o duración inválidos' });
+    }
 
     const service = await prisma.service.create({
       data: {
         name,
-        price: price ? parseFloat(price) : 0,
+        priceCents: canonicalPriceCents,
+        price: centsToDollars(canonicalPriceCents),
+        currency: 'USD',
         description,
-        duration: duration ? parseInt(duration) : null,
+        duration: Number(duration),
         doctorProfileId: doctor.id
       }
     });
 
-    res.status(201).json(service);
+    res.status(201).json({ ...service, price: centsToDollars(service.priceCents!), priceCents: service.priceCents, currency: service.currency });
   } catch (error) {
     console.error('[Doctor Controller] Error en addService:', error);
     res.status(500).json({ error: 'Error al añadir el servicio' });
@@ -412,7 +422,9 @@ export const addAppointment = async (req: AuthRequest, res: Response) => {
           data: {
             name: 'Bloqueo de Horario',
             duration: 60,
-            price: 0
+            price: 0,
+            priceCents: 0,
+            currency: 'USD'
           }
         });
       }
@@ -426,7 +438,9 @@ export const addAppointment = async (req: AuthRequest, res: Response) => {
           data: {
             name: 'Consulta Temporal',
             duration: 30,
-            price: 50
+            price: 50,
+            priceCents: 5000,
+            currency: 'USD'
           }
         });
       }
@@ -439,6 +453,9 @@ export const addAppointment = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'patientId y serviceId son obligatorios para citas médicas' });
     }
 
+    const service = await prisma.service.findUnique({ where: { id: finalServiceId } });
+    if (!service) return res.status(404).json({ error: 'Servicio no encontrado' });
+    const snapshot = buildServiceSnapshot(service);
     const appointment = await prisma.appointment.create({
       data: {
         patientId: finalPatientId,
@@ -450,6 +467,7 @@ export const addAppointment = async (req: AuthRequest, res: Response) => {
         endTime,
         status: type === 'cita' ? 'CONFIRMED' : 'PENDING',
         notes: title || type
+        ,...snapshot
       }
     });
 

@@ -62,23 +62,21 @@ export const getClinicDashboardMetrics = async (req: AuthRequest, res: Response)
       prisma.appointment.count({
         where: { clinicProfileId, date: dateFilter, status: 'COMPLETED' } // o CONFIRMED/PAID
       }),
-      // Para ingresos y top servicios necesitamos los servicios asociados
+      // Revenue is historical: never read the current Service price.
       prisma.appointment.findMany({
         where: { clinicProfileId, date: dateFilter, paymentStatus: 'PAID' },
-        include: { service: true }
+        select: { serviceId: true, serviceNameSnapshot: true, servicePriceCentsSnapshot: true }
       })
     ]);
 
     // Calcular ingresos totales
-    const totalRevenue = appointmentsWithServices.reduce((sum, appt) => {
-      return sum + (appt.service?.price || 0);
-    }, 0);
+    const totalRevenueCents = appointmentsWithServices.reduce((sum, appt) => sum + (appt.servicePriceCentsSnapshot || 0), 0);
 
     // Calcular top 5 servicios
     const serviceCounts: Record<string, { name: string; count: number }> = {};
     appointmentsWithServices.forEach(appt => {
       const srvId = appt.serviceId;
-      const srvName = appt.service.name;
+      const srvName = appt.serviceNameSnapshot || 'Servicio histórico sin snapshot';
       if (!serviceCounts[srvId]) {
         serviceCounts[srvId] = { name: srvName, count: 0 };
       }
@@ -96,7 +94,9 @@ export const getClinicDashboardMetrics = async (req: AuthRequest, res: Response)
         totalCompleted,
       },
       revenue: {
-        total: totalRevenue
+        totalCents: totalRevenueCents,
+        total: totalRevenueCents / 100,
+        currency: 'USD'
       },
       topServices,
       dateRange: {
@@ -207,4 +207,3 @@ export const getMetrics = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ error: 'Error calculando métricas' });
   }
 };
-

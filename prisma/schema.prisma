@@ -56,6 +56,10 @@ enum VerificationStatus {
   SUSPENDED
 }
 
+enum Currency {
+  USD
+}
+
 // ---------------------------------------------------------------------------
 // 1. MODELO CENTRAL: USER Y SEGURIDAD
 // ---------------------------------------------------------------------------
@@ -304,12 +308,19 @@ model Appointment {
   notes           String?
 
   // Pagos
-  paymentMethod      String        @default("NONE")
-  paymentStatus      PaymentStatus @default(PENDING_CASH)
-  paymentId          String?       @unique
-  verificationCode   String?       @unique
-  commissionAmount   Float?
-  cancellationReason String?
+  paymentMethod                  String        @default("NONE")
+  paymentStatus                  PaymentStatus @default(PENDING_CASH)
+  paymentId                      String?       @unique
+  verificationCode               String?       @unique
+  commissionAmount               Float?
+  cancellationReason             String?
+  // Historical values are nullable only while legacy appointments are backfilled.
+  serviceNameSnapshot            String?
+  servicePriceCentsSnapshot      Int?
+  serviceDurationMinutesSnapshot Int?
+  currencySnapshot               Currency?
+  paymentAmountCents             Int?
+  paymentCurrency                Currency?
 
   // Recordatorios y Asistencia
   turnNumber         Int?
@@ -360,11 +371,15 @@ model Review {
 }
 
 model Service {
-  id          String  @id @default(uuid())
+  id          String   @id @default(uuid())
   name        String
   description String?
-  price       Float   @default(0)
+  price       Float    @default(0)
+  // Legacy decimal kept for API/data transition; priceCents is canonical.
+  priceCents  Int?
+  currency    Currency @default(USD)
   duration    Int? // en minutos
+  isActive    Boolean  @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

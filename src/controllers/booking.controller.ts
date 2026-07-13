@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import crypto from 'crypto';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
+import { buildServiceSnapshot } from '../services/serviceSnapshot.service';
 import { syncAppointmentToCalendar, updateCalendarEventStatus, deleteCalendarEvent } from '../services/calendarSync.service';
 import { emailService } from '../services/email.service';
 import { canAccessAppointment } from '../services/appointmentAuthorization.service';
@@ -162,8 +163,10 @@ export const bookAppointment = async (req: AuthRequest, res: Response) => {
     if (!doctor || !doctor.user) return res.status(404).json({ error: 'Doctor no encontrado' });
     if (doctor.verificationStatus !== 'APPROVED') return res.status(404).json({ error: 'Doctor no disponible' });
 
-    const durationMinutes = service.duration || 30;
-    const price = service.price || 0;
+    if (service.doctorProfileId !== doctorId && service.clinicProfileId !== clinicId) return res.status(403).json({ error: 'El servicio no pertenece al médico o clínica seleccionados.' });
+    const snapshot = buildServiceSnapshot(service);
+    const durationMinutes = snapshot.serviceDurationMinutesSnapshot;
+    const priceCents = snapshot.servicePriceCentsSnapshot;
 
     const timeToMinutes = (timeString: string) => {
       const parts = timeString.split(':');
@@ -206,11 +209,11 @@ export const bookAppointment = async (req: AuthRequest, res: Response) => {
 
     // Paso C: Lógica de Negocio
     let finalPaymentMethod = paymentMethod;
-    let finalPaymentStatus = 'PENDING';
+    let finalPaymentStatus = 'PENDING_CASH';
     let finalStatus = 'PENDING'; // Mapeamos 'PENDING_CONFIRMATION' a 'PENDING'
     let verificationCode: string | null = null;
 
-    if (isRevision === true || price === 0) {
+    if (isRevision === true || priceCents === 0) {
       finalPaymentMethod = 'NONE';
       finalPaymentStatus = 'PAID';
       finalStatus = 'CONFIRMED';
@@ -219,7 +222,7 @@ export const bookAppointment = async (req: AuthRequest, res: Response) => {
       finalPaymentStatus = 'PAID';
       finalStatus = 'CONFIRMED'; // Simulamos éxito por ahora
     } else if (paymentMethod === 'CASH') {
-      finalPaymentStatus = 'PENDING';
+      finalPaymentStatus = 'PENDING_CASH';
       finalStatus = 'PENDING';
       verificationCode = crypto.randomBytes(3).toString('hex').toUpperCase();
     }
@@ -273,7 +276,8 @@ export const bookAppointment = async (req: AuthRequest, res: Response) => {
         paymentMethod: finalPaymentMethod,
         paymentStatus: finalPaymentStatus as any,
         verificationCode,
-        turnNumber
+        turnNumber,
+        ...snapshot
       }
     });
 

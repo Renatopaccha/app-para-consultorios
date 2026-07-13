@@ -417,6 +417,7 @@ export const emailService = {
    * Envía confirmación de cita al paciente (incluyendo PIN si es pago en efectivo)
    */
   async sendAppointmentConfirmation(to: string, patientName: string, doctorName: string, date: string, time: string, turnNumber: number, isCash: boolean, pin?: string | null) {
+    if (process.env.NODE_ENV === 'test') return;
     try {
       const pinHtml = isCash && pin 
         ? `<div style="background-color: #fdf2e9; padding: 15px; border-left: 4px solid #e67e22; margin: 20px 0;">
@@ -458,6 +459,7 @@ export const emailService = {
    * Envía notificación de nueva cita al doctor
    */
   async sendDoctorNewBooking(to: string, doctorName: string, patientName: string, date: string, time: string, serviceName: string) {
+    if (process.env.NODE_ENV === 'test') return;
     try {
       const html = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">

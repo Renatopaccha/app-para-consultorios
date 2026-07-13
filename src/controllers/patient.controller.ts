@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
+import { buildServiceSnapshot } from '../services/serviceSnapshot.service';
 import { notificationService } from '../services/notification.service';
 
 /**
@@ -77,7 +78,9 @@ export const scheduleAppointment = async (req: AuthRequest, res: Response) => {
     }
 
     // Calcular endTime en base a la duración del servicio
-    const durationMinutes = serviceExists.duration || 30;
+    if (serviceExists.doctorProfileId !== doctorId && serviceExists.clinicProfileId !== clinicId) return res.status(403).json({ error: 'El servicio no pertenece al médico o clínica seleccionados.' });
+    const snapshot = buildServiceSnapshot(serviceExists);
+    const durationMinutes = snapshot.serviceDurationMinutesSnapshot;
     const timeToMinutes = (timeString: string) => {
       const parts = timeString.split(':');
       const hours = Number(parts[0]) || 0;
@@ -102,7 +105,8 @@ export const scheduleAppointment = async (req: AuthRequest, res: Response) => {
         date: appointmentDate,
         startTime,
         endTime,
-        status: 'PENDING'
+        status: 'PENDING',
+        ...snapshot
       }
     });
 
