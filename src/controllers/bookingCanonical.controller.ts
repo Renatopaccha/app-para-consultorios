@@ -3,6 +3,8 @@ import prisma from '../prisma';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { BookingError, createAppointment } from '../services/appointmentBooking.service';
 import { cancelAppointment, rescheduleAppointment } from '../services/appointmentBooking.service';
+import { confirmPatientAppointment } from '../services/appointmentConfirmation.service';
+import { getAppointmentCalendarPresentation } from '../services/appointmentCalendarPresentation.service';
 import { localDateTimeToUtc, localDate, localTime, minutes } from '../utils/scheduling';
 
 function respond(error: unknown, res: Response) {
@@ -29,3 +31,5 @@ export async function getAvailability(req: AuthRequest, res: Response) {
 }
 export async function cancelCanonical(req: AuthRequest, res: Response) { if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' }); try { return res.json(await cancelAppointment(String(req.params.id), req.user.id, typeof req.body.reason === 'string' ? req.body.reason : undefined)); } catch (error) { return respond(error, res); } }
 export async function rescheduleCanonical(req: AuthRequest, res: Response) { if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' }); try { return res.json(await rescheduleAppointment(String(req.params.id), req.user.id, req.body.startsAt)); } catch (error) { return respond(error, res); } }
+export async function confirmCanonical(req: AuthRequest, res: Response) { if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' }); try { return res.json(await confirmPatientAppointment(String(req.params.id), req.user.id)); } catch (error) { return respond(error, res); } }
+export function calendarPresentation(appointment: { status: string; patientConfirmationStatus: string; paymentStatus: string }) { return getAppointmentCalendarPresentation(appointment); }

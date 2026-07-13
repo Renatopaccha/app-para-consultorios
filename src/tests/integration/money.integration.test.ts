@@ -75,4 +75,39 @@ describe('snapshot monetario con PostgreSQL real', () => {
     const instant = new Date('2026-08-05T14:00:00.000Z');
     expect((await prisma.appointment.count({ where: { doctorProfileId: doctorId, startsAt: instant } })) + (await prisma.scheduleBlock.count({ where: { doctorProfileId: doctorId, startsAt: instant } }))).toBe(1);
   });
+
+  it('reprogramación y reserva simultáneas tienen un único ganador en el horario B', async () => {
+    const service = await prisma.service.create({ data: { name: 'Carrera reprogramación', price: 20, priceCents: 2000, duration: 30, doctorProfileId: doctorId } });
+    const original = await request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send({ doctorId, clinicId, serviceId: service.id, startsAt: '2026-08-06T09:00:00-05:00', paymentMethod: 'CASH' }).expect(201);
+    const target = '2026-08-06T10:00:00-05:00';
+    const [rescheduled, booked] = await Promise.all([
+      request(app).patch(`/api/bookings/${original.body.id}/reschedule`).set('Authorization', `Bearer ${patientToken}`).send({ startsAt: target }),
+      request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send({ doctorId, clinicId, serviceId: service.id, startsAt: target, paymentMethod: 'CASH' }),
+    ]);
+    expect([rescheduled.status, booked.status].sort()).toEqual([201, 409]);
+    expect(await prisma.appointment.count({ where: { doctorProfileId: doctorId, startsAt: new Date('2026-08-06T15:00:00.000Z') } })).toBe(1);
+    expect(await prisma.appointmentChangeLog.count({ where: { appointmentId: original.body.id, changeType: 'RESCHEDULED' } })).toBe(rescheduled.status === 200 ? 1 : 0);
+    if (rescheduled.status === 409) expect((await prisma.appointment.findUniqueOrThrow({ where: { id: original.body.id } })).startsAt).toEqual(new Date('2026-08-06T14:00:00.000Z'));
+  });
+
+  it('dos reprogramaciones simultáneas dejan un único historial ganador', async () => {
+    const service = await prisma.service.create({ data: { name: 'Doble reprogramación', price: 20, priceCents: 2000, duration: 30, doctorProfileId: doctorId } });
+    const original = await request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send({ doctorId, clinicId, serviceId: service.id, startsAt: '2026-08-07T09:00:00-05:00', paymentMethod: 'CASH' }).expect(201);
+    const [toB, toC] = await Promise.all([
+      request(app).patch(`/api/bookings/${original.body.id}/reschedule`).set('Authorization', `Bearer ${patientToken}`).send({ startsAt: '2026-08-07T10:00:00-05:00' }),
+      request(app).patch(`/api/bookings/${original.body.id}/reschedule`).set('Authorization', `Bearer ${patientToken}`).send({ startsAt: '2026-08-07T11:00:00-05:00' }),
+    ]);
+    expect([toB.status, toC.status].sort()).toEqual([200, 409]);
+    const final = await prisma.appointment.findUniqueOrThrow({ where: { id: original.body.id } });
+    expect([new Date('2026-08-07T15:00:00.000Z').getTime(), new Date('2026-08-07T16:00:00.000Z').getTime()]).toContain(final.startsAt?.getTime());
+    expect(await prisma.appointmentChangeLog.count({ where: { appointmentId: original.body.id, changeType: 'RESCHEDULED' } })).toBe(1);
+  });
+
+  it('confirma al paciente sin cambiar el pago y deriva etiqueta de calendario', async () => {
+    const service = await prisma.service.create({ data: { name: 'Confirmable', price: 20, priceCents: 2000, duration: 30, doctorProfileId: doctorId } });
+    const created = await request(app).post('/api/bookings/book').set('Authorization', `Bearer ${patientToken}`).send({ doctorId, clinicId, serviceId: service.id, startsAt: '2026-08-08T09:00:00-05:00', paymentMethod: 'CASH' }).expect(201);
+    expect(created.body.patientConfirmationStatus).toBe('PENDING');
+    const confirmed = await request(app).patch(`/api/bookings/${created.body.id}/confirm`).set('Authorization', `Bearer ${patientToken}`).send({}).expect(200);
+    expect(confirmed.body).toMatchObject({ patientConfirmationStatus: 'CONFIRMED', paymentStatus: 'PENDING_CASH' });
+  });
 });

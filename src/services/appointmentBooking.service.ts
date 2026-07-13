@@ -3,6 +3,7 @@ import prisma from '../prisma';
 import { buildServiceSnapshot } from './serviceSnapshot.service';
 import { localDate, localDateTimeToUtc, localTime, minutes, parseRequestedStart } from '../utils/scheduling';
 import crypto from 'crypto';
+import { confirmationDeadline } from './appointmentConfirmation.service';
 
 export class BookingError extends Error { constructor(public code: string, public status: number, message: string) { super(message); } }
 const occupied = ['PENDING', 'CONFIRMED', 'IN_PROGRESS'] as const;
@@ -33,7 +34,7 @@ export async function createAppointment(input: { patientUserId: string; doctorId
       const block = await tx.scheduleBlock.findFirst({ where: { doctorProfileId: doctor.id, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } } });
       if (block) throw new BookingError('APPOINTMENT_TIME_CONFLICT', 409, 'El horario seleccionado ya no está disponible.');
       const paymentMethod = input.paymentMethod === 'CASH' ? 'CASH' : 'NONE';
-      return tx.appointment.create({ data: { patientId: patient.id, doctorProfileId: doctor.id, clinicProfileId: clinic.id, serviceId: service.id, date: localDateTimeToUtc(localDate(startsAt), '00:00'), startTime: localTime(startsAt), endTime: localTime(endsAt), startDatetime: startsAt, startsAt, endsAt, status: paymentMethod === 'NONE' || snapshot.servicePriceCentsSnapshot === 0 ? 'CONFIRMED' : 'PENDING', paymentMethod, paymentStatus: paymentMethod === 'CASH' ? 'PENDING_CASH' : 'PAID', verificationCode: paymentMethod === 'CASH' ? crypto.randomBytes(3).toString('hex').toUpperCase() : null, ...snapshot } });
+      return tx.appointment.create({ data: { patientId: patient.id, doctorProfileId: doctor.id, clinicProfileId: clinic.id, serviceId: service.id, date: localDateTimeToUtc(localDate(startsAt), '00:00'), startTime: localTime(startsAt), endTime: localTime(endsAt), startDatetime: startsAt, startsAt, endsAt, confirmationDeadlineAt: confirmationDeadline(startsAt), status: paymentMethod === 'NONE' || snapshot.servicePriceCentsSnapshot === 0 ? 'CONFIRMED' : 'PENDING', paymentMethod, paymentStatus: paymentMethod === 'CASH' ? 'PENDING_CASH' : 'PAID', verificationCode: paymentMethod === 'CASH' ? crypto.randomBytes(3).toString('hex').toUpperCase() : null, ...snapshot } });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
     if (error instanceof BookingError) throw error;
@@ -68,7 +69,9 @@ export async function rescheduleAppointment(appointmentId: string, actorId: stri
     const weekday = (startsAt.getUTCDay() + 6) % 7; const schedules = workplace ? await tx.workSchedule.findMany({ where: { workplaceId: workplace.id, weekday } }) : [];
     if (localDate(startsAt) !== localDate(endsAt) || !schedules.some(s => minutes(localTime(startsAt)) >= minutes(s.startTime) && minutes(localTime(endsAt)) <= minutes(s.endTime))) throw new BookingError('OUTSIDE_WORKING_HOURS', 422, 'El horario está fuera de la jornada.');
     if (await tx.scheduleBlock.findFirst({ where: { doctorProfileId: appointment.doctorProfileId, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } } })) throw new BookingError('APPOINTMENT_TIME_CONFLICT', 409, 'El horario seleccionado ya no está disponible.');
-    const updated = await tx.appointment.update({ where: { id: appointment.id }, data: { previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, startsAt, endsAt, startDatetime: startsAt, date: localDateTimeToUtc(localDate(startsAt), '00:00'), startTime: localTime(startsAt), endTime: localTime(endsAt) } });
+    const changed = await tx.appointment.updateMany({ where: { id: appointment.id, startsAt: appointment.startsAt, endsAt: appointment.endsAt }, data: { previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, startsAt, endsAt, startDatetime: startsAt, date: localDateTimeToUtc(localDate(startsAt), '00:00'), startTime: localTime(startsAt), endTime: localTime(endsAt) } });
+    if (changed.count !== 1) throw new BookingError('APPOINTMENT_TIME_CONFLICT', 409, 'La cita fue modificada simultáneamente.');
+    const updated = await tx.appointment.findUniqueOrThrow({ where: { id: appointment.id } });
     await tx.appointmentChangeLog.create({ data: { appointmentId, changedByUserId: actorId, changeType: 'RESCHEDULED', previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, newStartsAt: startsAt, newEndsAt: endsAt, previousStatus: appointment.status, newStatus: appointment.status } }); return updated;
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); } catch (error) { if (error instanceof BookingError) throw error; if (String(error).includes('Appointment_no_active_doctor_overlap') || String(error).includes('23P01')) throw new BookingError('APPOINTMENT_TIME_CONFLICT', 409, 'El horario seleccionado ya no está disponible.'); throw error; }
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); } catch (error) { if (error instanceof BookingError) throw error; if ((error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') || String(error).includes('Appointment_no_active_doctor_overlap') || String(error).includes('23P01')) throw new BookingError('APPOINTMENT_TIME_CONFLICT', 409, 'El horario seleccionado ya no está disponible.'); throw error; }
 }

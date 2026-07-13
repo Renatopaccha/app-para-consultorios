@@ -67,6 +67,13 @@ enum AppointmentChangeType {
   STATUS_CHANGED
 }
 
+enum PatientConfirmationStatus {
+  PENDING
+  CONFIRMED
+  DECLINED
+  EXPIRED
+}
+
 // ---------------------------------------------------------------------------
 // 1. MODELO CENTRAL: USER Y SEGURIDAD
 // ---------------------------------------------------------------------------
@@ -338,13 +345,17 @@ model Appointment {
   paymentCurrency                Currency?
 
   // Recordatorios y Asistencia
-  turnNumber         Int?
-  isPatientConfirmed Boolean  @default(false)
-  reminder24hSent    Boolean  @default(false)
-  reminder2hSent     Boolean  @default(false)
-  reminder1hSent     Boolean  @default(false)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  turnNumber                 Int?
+  isPatientConfirmed         Boolean                   @default(false)
+  patientConfirmationStatus  PatientConfirmationStatus @default(PENDING)
+  patientConfirmedAt         DateTime?                 @db.Timestamptz(3)
+  confirmationDeadlineAt     DateTime?                 @db.Timestamptz(3)
+  confirmationReminderSentAt DateTime?                 @db.Timestamptz(3)
+  reminder24hSent            Boolean                   @default(false)
+  reminder2hSent             Boolean                   @default(false)
+  reminder1hSent             Boolean                   @default(false)
+  createdAt                  DateTime                  @default(now())
+  updatedAt                  DateTime                  @updatedAt
 
   // Integración Calendarios Externos
   googleEventId  String?
