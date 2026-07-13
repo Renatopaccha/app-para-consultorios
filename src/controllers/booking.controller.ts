@@ -14,6 +14,12 @@ export const getAvailableSlots = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Faltan parámetros requeridos: doctorId, clinicId, date, serviceId' });
     }
 
+    const doctor = await prisma.doctorProfile.findFirst({
+      where: { id: String(doctorId), verificationStatus: 'APPROVED' },
+      select: { id: true },
+    });
+    if (!doctor) return res.status(404).json({ error: 'Doctor no disponible' });
+
     // 1. Obtener la duración del servicio
     const service = await prisma.service.findUnique({
       where: { id: String(serviceId) }
@@ -154,6 +160,7 @@ export const bookAppointment = async (req: AuthRequest, res: Response) => {
     if (!service) return res.status(404).json({ error: 'Servicio no encontrado' });
     if (!patient) return res.status(404).json({ error: 'Paciente no encontrado' });
     if (!doctor || !doctor.user) return res.status(404).json({ error: 'Doctor no encontrado' });
+    if (doctor.verificationStatus !== 'APPROVED') return res.status(404).json({ error: 'Doctor no disponible' });
 
     const durationMinutes = service.duration || 30;
     const price = service.price || 0;

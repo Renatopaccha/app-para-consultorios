@@ -11,6 +11,7 @@ export const getDoctors = async (req: Request, res: Response) => {
     const skip = (page - 1) * limit;
 
     const doctors = await prisma.doctorProfile.findMany({
+      where: { verificationStatus: 'APPROVED' },
       skip,
       take: limit,
       select: {
@@ -52,8 +53,8 @@ export const getDoctors = async (req: Request, res: Response) => {
 export const getDoctorById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const doctor = await prisma.doctorProfile.findUnique({ 
-      where: { id: id as string },
+    const doctor = await prisma.doctorProfile.findFirst({ 
+      where: { id: id as string, verificationStatus: 'APPROVED' },
       select: {
         id: true,
         bio: true,

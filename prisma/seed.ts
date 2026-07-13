@@ -1,7 +1,29 @@
 import prisma from '../src/prisma';
+import bcrypt from 'bcrypt';
 
 async function main() {
     console.log('🌱 Iniciando la siembra de datos de Zenda...');
+
+    const adminEmail = process.env.SEED_SUPER_ADMIN_EMAIL?.trim().toLowerCase();
+    const adminPassword = process.env.SEED_SUPER_ADMIN_PASSWORD;
+    if (adminEmail || adminPassword) {
+        if (!adminEmail || !adminPassword || adminPassword.length < 12) {
+            throw new Error('SEED_SUPER_ADMIN_EMAIL y una contraseña de al menos 12 caracteres son requeridos juntos.');
+        }
+        const passwordHash = await bcrypt.hash(adminPassword, 12);
+        await prisma.user.upsert({
+            where: { email: adminEmail },
+            update: { role: 'SUPER_ADMIN', passwordHash },
+            create: {
+                email: adminEmail,
+                passwordHash,
+                firstName: 'Administrador',
+                lastName: 'Zenda',
+                role: 'SUPER_ADMIN',
+            },
+        });
+        console.log('✅ Superadministrador de desarrollo preparado.');
+    }
 
     // 1. Catálogo de Seguros Médicos
     const insurances = [

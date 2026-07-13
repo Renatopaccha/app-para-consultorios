@@ -10,6 +10,7 @@ export const getClinics = async (req: Request, res: Response) => {
     const skip = (page - 1) * limit;
 
     const clinics = await prisma.clinicProfile.findMany({
+      where: { verificationStatus: 'APPROVED' },
       skip,
       take: limit,
       select: {
@@ -32,8 +33,8 @@ export const getClinicById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
-    const clinic = await prisma.clinicProfile.findUnique({ 
-      where: { id: id as string },
+    const clinic = await prisma.clinicProfile.findFirst({ 
+      where: { id: id as string, verificationStatus: 'APPROVED' },
       select: {
         id: true,
         name: true,

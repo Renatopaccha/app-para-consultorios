@@ -16,6 +16,7 @@ export const getActiveDoctors = async (req: AuthRequest, res: Response) => {
     const doctors = await prisma.doctorProfile.findMany({
       where: {
         isVerified: true, // Asumimos que los activos son los verificados
+        verificationStatus: 'APPROVED',
       },
       skip,
       take: limit,
@@ -71,7 +72,7 @@ export const scheduleAppointment = async (req: AuthRequest, res: Response) => {
     const clinicExists = await prisma.clinicProfile.findUnique({ where: { id: clinicId } });
     const serviceExists = await prisma.service.findUnique({ where: { id: serviceId } });
 
-    if (!doctorExists || !clinicExists || !serviceExists) {
+    if (!doctorExists || doctorExists.verificationStatus !== 'APPROVED' || !clinicExists || clinicExists.verificationStatus !== 'APPROVED' || !serviceExists) {
       return res.status(404).json({ error: 'El doctor, la clínica o el servicio especificado no existen.' });
     }
 

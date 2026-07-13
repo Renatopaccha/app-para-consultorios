@@ -17,6 +17,17 @@ const roleTranslations: Record<string, string> = {
 
 export const emailService = {
 
+  async sendInvitationEmail(to: string, role: string, invitationToken: string, expiresAt: Date) {
+    const invitationUrl = `${process.env.INVITATION_ACCEPT_URL || 'http://localhost:5173/accept-invitation'}?token=${encodeURIComponent(invitationToken)}`;
+    const accountType = role === 'DOCTOR' ? 'médico' : 'administrador de clínica';
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to,
+      subject: 'Invitación para crear tu cuenta profesional en Zenda',
+      html: `<p>Recibiste una invitación para crear una cuenta como ${accountType}.</p><p><a href="${invitationUrl}">Aceptar invitación</a></p><p>La invitación vence el ${expiresAt.toLocaleString('es-EC')}.</p>`,
+    });
+  },
+
   /**
    * Envía confirmación de cita al paciente cuando el doctor agendó directamente.
    * Incluye la clínica y banners promocionales de Zenda.

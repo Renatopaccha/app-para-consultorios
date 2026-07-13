@@ -16,6 +16,7 @@ import calendarRoutes from './routes/calendar.routes';
 import dashboardRoutes from './routes/dashboard.routes';
 import assistantRoutes from './routes/assistant.routes';
 import profileRoutes from './routes/profile.routes';
+import adminRoutes from './routes/admin.routes';
 
 // Tareas programadas (Cron Jobs)
 import './jobs/reminder.job';
@@ -53,6 +54,7 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/assistant', assistantRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/admin', adminRoutes);
 
 const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   console.error('[API] Unhandled request error:', error instanceof Error ? error.message : error);

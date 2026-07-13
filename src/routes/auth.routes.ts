@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { register, login, forgotPassword, resetPassword } from '../controllers/auth.controller';
+import { acceptInvitation, validateInvitation } from '../controllers/invitation.controller';
 
 const router = Router();
 const authLimiter = rateLimit({
@@ -18,5 +19,7 @@ router.post('/login', authLimiter, login);
 // Rutas de Recuperación de Contraseña
 router.post('/forgot-password', authLimiter, forgotPassword);
 router.post('/reset-password', authLimiter, resetPassword);
+router.get('/invitations/validate', authLimiter, validateInvitation);
+router.post('/accept-invitation', authLimiter, acceptInvitation);
 
 export default router;

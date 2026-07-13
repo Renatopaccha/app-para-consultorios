@@ -35,7 +35,7 @@ export const searchDoctorsAndClinics = async (req: Request, res: Response) => {
     }
 
     // 2. Filtros Avanzados para Doctores
-    const whereClause: any = {};
+    const whereClause: any = { verificationStatus: 'APPROVED' };
 
     // Búsqueda por texto libre
     if (q) {

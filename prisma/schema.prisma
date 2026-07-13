@@ -49,6 +49,13 @@ enum PayerType {
   CLINIC
 }
 
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
 // ---------------------------------------------------------------------------
 // 1. MODELO CENTRAL: USER Y SEGURIDAD
 // ---------------------------------------------------------------------------
@@ -86,6 +93,7 @@ model User {
   appointmentsAsPatient Appointment[] @relation("PatientAppointments")
   reviewsGiven          Review[]      @relation("PatientReviews")
   securityLogs          SecurityLog[]
+  invitationsCreated    Invitation[]  @relation("InvitationsCreated")
 
   @@index([email])
   @@index([resetPasswordToken])
@@ -122,6 +130,9 @@ model ClinicProfile {
   // Pagos y Suscripciones
   kushkiCardToken    String?
   subscriptionStatus SubscriptionStatus @default(INACTIVE)
+  verificationStatus VerificationStatus @default(PENDING)
+  verifiedAt         DateTime?
+  verifiedByUserId   String?
 
   // Integración Calendar
   googleRefreshToken  String?
@@ -142,23 +153,28 @@ model ClinicProfile {
   insurances        Insurance[]
   assistants        AssistantProfile[]
   services          Service[]
+  invitations       Invitation[]            @relation("ClinicInvitations")
 
   @@index([latitude, longitude])
   @@index([subscriptionStatus])
+  @@index([verificationStatus])
 }
 
 model DoctorProfile {
-  id                String   @id @default(uuid())
-  userId            String   @unique
-  licenseNumber     String   @unique
-  isVerified        Boolean  @default(false)
-  isIndependent     Boolean  @default(false)
-  bio               String?
-  profileImageUrl   String?
-  languages         String[]
-  portfolioImages   String[]
-  isAvailable       Boolean  @default(true)
-  consultationPrice Float
+  id                 String             @id @default(uuid())
+  userId             String             @unique
+  licenseNumber      String             @unique
+  isVerified         Boolean            @default(false)
+  verificationStatus VerificationStatus @default(PENDING)
+  verifiedAt         DateTime?
+  verifiedByUserId   String?
+  isIndependent      Boolean            @default(false)
+  bio                String?
+  profileImageUrl    String?
+  languages          String[]
+  portfolioImages    String[]
+  isAvailable        Boolean            @default(true)
+  consultationPrice  Float
 
   // Pagos y Suscripciones
   walletBalance          Float              @default(0)
@@ -190,6 +206,7 @@ model DoctorProfile {
 
   @@index([isVerified])
   @@index([subscriptionStatus])
+  @@index([verificationStatus])
 }
 
 model AssistantProfile {
@@ -393,4 +410,28 @@ model WorkSchedule {
   workplace   DoctorClinicWorkplace @relation(fields: [workplaceId], references: [id], onDelete: Cascade)
 
   @@index([workplaceId])
+}
+
+model Invitation {
+  id              String    @id @default(uuid())
+  email           String
+  role            Role
+  tokenHash       String    @unique
+  clinicProfileId String?
+  invitedByUserId String
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  clinicProfile ClinicProfile? @relation("ClinicInvitations", fields: [clinicProfileId], references: [id], onDelete: SetNull)
+  invitedBy     User           @relation("InvitationsCreated", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([email])
+  @@index([expiresAt])
+  @@index([acceptedAt])
+  @@index([revokedAt])
+  @@index([role])
+  @@index([clinicProfileId])
 }
