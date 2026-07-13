@@ -24,7 +24,10 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
   }
 
   try {
-    const decoded = verifyToken(token) as { id: string; role: Role };
+    const decoded = verifyToken(token) as { id: string; role: Role } | null;
+    if (!decoded || !decoded.id) {
+      return res.status(401).json({ error: 'Token inválido o expirado' });
+    }
     req.user = decoded;
     next();
   } catch (error) {

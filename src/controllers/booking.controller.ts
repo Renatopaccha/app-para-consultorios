@@ -4,6 +4,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
 import { syncAppointmentToCalendar, updateCalendarEventStatus, deleteCalendarEvent } from '../services/calendarSync.service';
 import { emailService } from '../services/email.service';
+import { canAccessAppointment } from '../services/appointmentAuthorization.service';
 
 export const getAvailableSlots = async (req: Request, res: Response) => {
   try {
@@ -38,7 +39,7 @@ export const getAvailableSlots = async (req: Request, res: Response) => {
           clinicProfileId: String(clinicId),
           isActive: true
         },
-        dayOfWeek: dayOfWeek
+        weekday: dayOfWeek
       }
     });
 
@@ -323,19 +324,10 @@ export const verifyCashPayment = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Código inválido o no encontrado' });
     }
 
-    const userRole = req.user?.role;
     const userId = req.user?.id;
-
-    if (userRole === 'ASSISTANT' && userId) {
-      const assistant = await prisma.assistantProfile.findUnique({ where: { userId } });
-      if (!assistant) return res.status(403).json({ error: 'Perfil de asistente no encontrado' });
-      
-      if (assistant.clinicProfileId && assistant.clinicProfileId !== appointment.clinicProfileId) {
-        return res.status(403).json({ error: 'No tienes permisos para operar citas de otra clínica' });
-      }
-      if (assistant.doctorProfileId && assistant.doctorProfileId !== appointment.doctorProfileId) {
-        return res.status(403).json({ error: 'No tienes permisos para operar citas de otro médico' });
-      }
+    const role = req.user?.role;
+    if (!userId || !role || !(await canAccessAppointment(userId, role, appointment))) {
+      return res.status(403).json({ error: 'No tienes permisos para verificar el pago de esta cita' });
     }
 
     if (appointment.paymentMethod !== 'CASH') {
@@ -350,7 +342,6 @@ export const verifyCashPayment = async (req: AuthRequest, res: Response) => {
       where: { id: appointment.id },
       data: {
         paymentStatus: 'PAID',
-        status: 'CONFIRMED',
         verificationCode: null // Invalidamos el código por seguridad extrema
       }
     });
@@ -387,7 +378,8 @@ export const cancelAppointmentByPatient = async (req: AuthRequest, res: Response
       return res.status(404).json({ error: 'Cita no encontrada' });
     }
 
-    if (appointment.patientId !== userId) {
+    const role = req.user?.role;
+    if (!role || !(await canAccessAppointment(userId, role, appointment))) {
       return res.status(403).json({ error: 'No tienes permisos para cancelar esta cita' });
     }
 
@@ -434,24 +426,9 @@ export const confirmPatientAttendance = async (req: AuthRequest, res: Response) 
       return res.status(404).json({ error: 'Cita no encontrada' });
     }
 
-    const userRole = req.user?.role;
-
-    if (userRole === 'PATIENT') {
-      if (appointment.patientId !== userId) {
-        return res.status(403).json({ error: 'No tienes permisos para confirmar esta cita' });
-      }
-    } else if (userRole === 'ASSISTANT') {
-      const assistant = await prisma.assistantProfile.findUnique({ where: { userId } });
-      if (!assistant) return res.status(403).json({ error: 'Perfil de asistente no encontrado' });
-      
-      if (assistant.clinicProfileId && assistant.clinicProfileId !== appointment.clinicProfileId) {
-        return res.status(403).json({ error: 'No tienes permisos para operar citas de otra clínica' });
-      }
-      if (assistant.doctorProfileId && assistant.doctorProfileId !== appointment.doctorProfileId) {
-        return res.status(403).json({ error: 'No tienes permisos para operar citas de otro médico' });
-      }
-    } else {
-      return res.status(403).json({ error: 'Rol no autorizado' });
+    const role = req.user?.role;
+    if (!role || !(await canAccessAppointment(userId, role, appointment))) {
+      return res.status(403).json({ error: 'No tienes permisos para confirmar esta cita' });
     }
 
     const updatedAppointment = await prisma.appointment.update({
@@ -507,7 +484,7 @@ export const getAppointments = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const getAppointmentById = async (req: Request, res: Response) => {
+export const getAppointmentById = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
     const appointment = await prisma.appointment.findUnique({ 
@@ -520,6 +497,11 @@ export const getAppointmentById = async (req: Request, res: Response) => {
     });
     if (!appointment) {
       return res.status(404).json({ error: 'Cita no encontrada' });
+    }
+    const userId = req.user?.id;
+    const role = req.user?.role;
+    if (!userId || !role || !(await canAccessAppointment(userId, role, appointment))) {
+      return res.status(403).json({ error: 'No tienes permisos para ver esta cita' });
     }
     res.json(appointment);
   } catch (error) {
@@ -552,19 +534,8 @@ export const updateBookingStatus = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Cita no encontrada' });
     }
 
-    // Validar que el Doctor o la Clínica sea dueño de la cita
-    if (userRole === 'DOCTOR') {
-      const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
-      if (doctor?.id !== appointment.doctorProfileId) {
-         return res.status(403).json({ error: 'No tienes permisos para modificar el estado de esta cita' });
-      }
-    } else if (userRole === 'CLINIC_ADMIN') {
-      const clinic = await prisma.clinicProfile.findUnique({ where: { userId } });
-      if (clinic?.id !== appointment.clinicProfileId) {
-         return res.status(403).json({ error: 'No tienes permisos para modificar el estado de esta cita' });
-      }
-    } else if (userRole !== 'SUPER_ADMIN') {
-       return res.status(403).json({ error: 'Rol no autorizado para esta acción' });
+    if (!userId || !userRole || !(await canAccessAppointment(userId, userRole, appointment))) {
+      return res.status(403).json({ error: 'No tienes permisos para modificar el estado de esta cita' });
     }
 
     const updatedAppointment = await prisma.appointment.update({

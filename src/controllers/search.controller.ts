@@ -101,7 +101,7 @@ export const searchDoctorsAndClinics = async (req: Request, res: Response) => {
             isActive: true,
             schedules: {
               some: {
-                dayOfWeek: currentDay
+                weekday: currentDay
               }
             }
           }
@@ -112,23 +112,19 @@ export const searchDoctorsAndClinics = async (req: Request, res: Response) => {
     // 3. Ejecutar Búsqueda en Prisma
     const doctors = await prisma.doctorProfile.findMany({
       where: whereClause,
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true
-          }
-        },
-        specialties: true,
-        insurances: true,
-        services: true,
+      select: {
+        id: true,
+        bio: true,
+        profileImageUrl: true,
+        consultationPrice: true,
+        languages: true,
+        user: { select: { id: true, firstName: true, lastName: true } },
+        specialties: { select: { id: true, name: true } },
+        insurances: { select: { id: true, name: true } },
+        services: { select: { id: true, name: true, description: true, price: true, duration: true } },
         workplaces: {
           where: { isActive: true },
-          include: {
-            clinicProfile: true
-          }
+          include: { clinicProfile: { select: { id: true, name: true, address: true, logoUrl: true, latitude: true, longitude: true, color: true } } }
         }
       }
     });

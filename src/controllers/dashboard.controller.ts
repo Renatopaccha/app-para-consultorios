@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
-import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO } from 'date-fns';
+import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO, isValid } from 'date-fns';
 
 export const getClinicDashboardMetrics = async (req: AuthRequest, res: Response) => {
   try {
@@ -115,16 +115,24 @@ export const getMetrics = async (req: AuthRequest, res: Response) => {
     const userId = req.user?.id;
     const { type, date } = req.query;
 
-    if (!type || !date || typeof date !== 'string') {
+    if (!type || !date || typeof date !== 'string' || date === 'undefined') {
       return res.status(400).json({ error: 'Parámetros inválidos. Se requiere "type" y "date".' });
     }
 
     const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
-    if (!doctor) return res.status(403).json({ error: 'No autorizado' });
+    if (!doctor) {
+      if (type === 'daily') return res.status(200).json({ total_today: 0, confirmed_today: 0, pending_today: 0 });
+      if (type === 'weekly') return res.status(200).json({ total_week: 0, confirmed_week: 0, pending_week: 0, blocked_hours_week: 0 });
+      if (type === 'monthly') return res.status(200).json({ patients_attended_month: 0, new_patients_month: 0, cancelled_month: 0 });
+      return res.status(200).json({});
+    }
 
     const baseDate = parseISO(date);
-    let start: Date;
-    let end: Date;
+    if (!isValid(baseDate)) {
+      return res.status(400).json({ error: 'Formato de fecha inválido.' });
+    }
+
+    let start: Date, end: Date;
 
     switch (type) {
       case 'daily':
@@ -143,45 +151,53 @@ export const getMetrics = async (req: AuthRequest, res: Response) => {
         return res.status(400).json({ error: 'Tipo inválido. Usa daily, weekly o monthly.' });
     }
 
-    const appointments = await prisma.appointment.findMany({
-      where: {
-        doctorProfileId: doctor.id,
-        startDatetime: { gte: start, lte: end }
-      },
-      include: { service: true }
-    });
+    const whereClause = {
+      doctorProfileId: doctor.id,
+      startDatetime: { gte: start, lte: end }
+    };
 
     if (type === 'daily') {
-      return res.json({
-        total_today: appointments.length,
-        confirmed_today: appointments.filter(a => a.status === 'CONFIRMED').length,
-        pending_today: appointments.filter(a => a.paymentStatus !== 'PAID').length
-      });
+      const [total_today, confirmed_today, pending_today] = await Promise.all([
+        prisma.appointment.count({ where: whereClause }),
+        prisma.appointment.count({ where: { ...whereClause, status: 'CONFIRMED' } }),
+        prisma.appointment.count({ where: { ...whereClause, paymentStatus: { not: 'PAID' } } })
+      ]);
+      return res.json({ total_today, confirmed_today, pending_today });
     }
 
     if (type === 'weekly') {
-      let blockedMinutes = 0;
-      appointments.forEach(a => {
-        if (a.service?.name?.toLowerCase().includes('bloqueo') && a.service.duration) {
-          blockedMinutes += a.service.duration;
-        }
-      });
+      const [total_week, confirmed_week, pending_week, blockedAppointments] = await Promise.all([
+        prisma.appointment.count({ where: whereClause }),
+        prisma.appointment.count({ where: { ...whereClause, status: 'CONFIRMED' } }),
+        prisma.appointment.count({ where: { ...whereClause, paymentStatus: { not: 'PAID' } } }),
+        prisma.appointment.findMany({ 
+          where: { ...whereClause, service: { name: { contains: 'bloqueo', mode: 'insensitive' } } },
+          include: { service: true }
+        })
+      ]);
 
+      const blockedMinutes = blockedAppointments.reduce((acc, appt) => acc + (appt.service?.duration || 0), 0);
       return res.json({
-        total_week: appointments.length,
-        confirmed_week: appointments.filter(a => a.status === 'CONFIRMED').length,
-        pending_week: appointments.filter(a => a.paymentStatus !== 'PAID').length,
+        total_week,
+        confirmed_week,
+        pending_week,
         blocked_hours_week: Math.floor(blockedMinutes / 60)
       });
     }
 
     if (type === 'monthly') {
-      const uniquePatients = new Set(appointments.map(a => a.patientId));
-      const cancelled_month = appointments.filter(a => a.status === 'CANCELLED').length;
+      const [cancelled_month, uniquePatients] = await Promise.all([
+        prisma.appointment.count({ where: { ...whereClause, status: 'CANCELLED' } }),
+        prisma.appointment.findMany({
+          where: whereClause,
+          select: { patientId: true },
+          distinct: ['patientId'] // <-- Solo trae IDs únicos
+        })
+      ]);
 
       return res.json({
-        patients_attended_month: uniquePatients.size,
-        new_patients_month: 0,
+        patients_attended_month: uniquePatients.length,
+        new_patients_month: 0, // Por ahora 0, se implementará lógica de negocio luego
         cancelled_month
       });
     }

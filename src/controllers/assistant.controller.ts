@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
 import { deleteCalendarEvent } from '../services/calendarSync.service';
+import { canAccessAppointment } from '../services/appointmentAuthorization.service';
 
 export const getAssistantDashboard = async (req: AuthRequest, res: Response) => {
   try {
@@ -92,6 +93,11 @@ export const startConsultation = async (req: AuthRequest, res: Response) => {
     const appointment = await prisma.appointment.findUnique({ where: { id } });
 
     if (!appointment) return res.status(404).json({ error: 'Cita no encontrada' });
+    const userId = req.user?.id;
+    const role = req.user?.role;
+    if (!userId || !role || !(await canAccessAppointment(userId, role, appointment))) {
+      return res.status(403).json({ error: 'No tienes permisos para modificar esta cita' });
+    }
     if (appointment.status !== 'CONFIRMED') {
       return res.status(400).json({ error: 'La cita debe estar confirmada para iniciar' });
     }
@@ -114,6 +120,11 @@ export const completeConsultation = async (req: AuthRequest, res: Response) => {
     const appointment = await prisma.appointment.findUnique({ where: { id } });
 
     if (!appointment) return res.status(404).json({ error: 'Cita no encontrada' });
+    const userId = req.user?.id;
+    const role = req.user?.role;
+    if (!userId || !role || !(await canAccessAppointment(userId, role, appointment))) {
+      return res.status(403).json({ error: 'No tienes permisos para modificar esta cita' });
+    }
     if (appointment.status !== 'IN_PROGRESS') {
       return res.status(400).json({ error: 'La cita debe estar en progreso para completarse' });
     }
@@ -136,6 +147,11 @@ export const markAsMissed = async (req: AuthRequest, res: Response) => {
     const appointment = await prisma.appointment.findUnique({ where: { id } });
 
     if (!appointment) return res.status(404).json({ error: 'Cita no encontrada' });
+    const userId = req.user?.id;
+    const role = req.user?.role;
+    if (!userId || !role || !(await canAccessAppointment(userId, role, appointment))) {
+      return res.status(403).json({ error: 'No tienes permisos para modificar esta cita' });
+    }
 
     const updated = await prisma.appointment.update({
       where: { id },
@@ -157,6 +173,11 @@ export const postponeTurn = async (req: AuthRequest, res: Response) => {
     const appointment = await prisma.appointment.findUnique({ where: { id } });
 
     if (!appointment) return res.status(404).json({ error: 'Cita no encontrada' });
+    const userId = req.user?.id;
+    const role = req.user?.role;
+    if (!userId || !role || !(await canAccessAppointment(userId, role, appointment))) {
+      return res.status(403).json({ error: 'No tienes permisos para modificar esta cita' });
+    }
     if (appointment.status !== 'CONFIRMED') {
       return res.status(400).json({ error: 'La cita debe estar confirmada para posponerse' });
     }
@@ -192,4 +213,3 @@ export const postponeTurn = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ error: 'Error al posponer turno' });
   }
 };
-

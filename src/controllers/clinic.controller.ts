@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
+import { canManageClinic } from '../services/appointmentAuthorization.service';
 
 export const getClinics = async (req: Request, res: Response) => {
   try {
@@ -17,8 +18,6 @@ export const getClinics = async (req: Request, res: Response) => {
         address: true,
         latitude: true,
         longitude: true,
-        phone: true,
-        subscriptionStatus: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -41,8 +40,6 @@ export const getClinicById = async (req: Request, res: Response) => {
         address: true,
         latitude: true,
         longitude: true,
-        phone: true,
-        subscriptionStatus: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -59,30 +56,7 @@ export const getClinicById = async (req: Request, res: Response) => {
 };
 
 export const createClinic = async (req: Request, res: Response) => {
-  try {
-    const { name, address } = req.body;
-    if (!name || !address) {
-      return res.status(400).json({ error: 'Faltan campos requeridos (name, address)' });
-    }
-
-    const clinic = await prisma.clinicProfile.create({ 
-      data: req.body,
-      select: {
-        id: true,
-        name: true,
-        address: true,
-        latitude: true,
-        longitude: true,
-        phone: true,
-        subscriptionStatus: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-    res.status(201).json(clinic);
-  } catch (error) {
-    res.status(500).json({ error: 'Error al crear clínica' });
-  }
+  res.status(501).json({ error: 'El aprovisionamiento administrativo de clínicas aún no está implementado.' });
 };
 
 /**
@@ -95,6 +69,12 @@ export const addDoctorToClinic = async (req: AuthRequest, res: Response) => {
 
     if (!email) {
       return res.status(400).json({ error: 'El email del doctor es requerido' });
+    }
+
+    const clinic = await prisma.clinicProfile.findUnique({ where: { id: clinicProfileId as string }, select: { id: true } });
+    if (!clinic) return res.status(404).json({ error: 'Clínica no encontrada' });
+    if (!req.user || !(await canManageClinic(req.user.id, req.user.role, clinic.id))) {
+      return res.status(403).json({ error: 'No tienes permisos para modificar esta clínica' });
     }
 
     // 1. Buscar al User por email y verificar que tenga DoctorProfile
@@ -142,6 +122,13 @@ export const addDoctorToClinic = async (req: AuthRequest, res: Response) => {
 export const removeDoctorFromClinic = async (req: AuthRequest, res: Response) => {
   try {
     const { clinicProfileId, doctorProfileId } = req.params;
+    const clinic = await prisma.clinicProfile.findUnique({ where: { id: clinicProfileId as string }, select: { id: true } });
+    if (!clinic) return res.status(404).json({ error: 'Clínica no encontrada' });
+    if (!req.user || !(await canManageClinic(req.user.id, req.user.role, clinic.id))) {
+      return res.status(403).json({ error: 'No tienes permisos para modificar esta clínica' });
+    }
+    const doctor = await prisma.doctorProfile.findUnique({ where: { id: doctorProfileId as string }, select: { id: true } });
+    if (!doctor) return res.status(404).json({ error: 'Médico no encontrado' });
 
     const workplace = await prisma.doctorClinicWorkplace.update({
       where: {
@@ -180,15 +167,13 @@ export const getClinicDoctors = async (req: Request, res: Response) => {
       },
       include: {
         doctorProfile: {
-          include: {
-            user: {
-              select: {
-                firstName: true,
-                lastName: true,
-                email: true,
-                phone: true,
-              }
-            }
+          select: {
+            id: true,
+            bio: true,
+            profileImageUrl: true,
+            consultationPrice: true,
+            specialties: { select: { id: true, name: true } },
+            user: { select: { firstName: true, lastName: true } },
           }
         }
       }
@@ -211,11 +196,11 @@ export const getMyClinics = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
     const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
-    if (!doctor) return res.status(403).json({ error: 'No autorizado' });
+    if (!doctor) return res.status(200).json([]);
 
     const workplaces = await prisma.doctorClinicWorkplace.findMany({
       where: { doctorProfileId: doctor.id, isActive: true },
-      include: { clinicProfile: true }
+      include: { clinicProfile: { select: { id: true, name: true, address: true, phone: true, logoUrl: true, latitude: true, longitude: true, color: true } } }
     });
 
     const clinics = workplaces.map(wp => wp.clinicProfile);

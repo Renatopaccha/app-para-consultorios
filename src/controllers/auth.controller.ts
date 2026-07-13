@@ -12,26 +12,11 @@ export const register = async (req: Request, res: Response) => {
       firstName, 
       lastName, 
       phone, 
-      role, 
-      
-      // Campos específicos para DOCTOR
-      licenseNumber, 
-      consultationPrice, 
-      clinicProfileId,
-      
-      // Campos específicos para CLINIC_ADMIN
-      name, 
-      address 
+      // Public registration deliberately ignores role and privileged profile fields.
     } = req.body;
 
-    if (!email || !password || !firstName || !lastName || !role) {
-      return res.status(400).json({ error: 'Faltan campos obligatorios para el registro (email, password, firstName, lastName, role)' });
-    }
-
-    // Validar que el rol sea uno de los permitidos por el enum de Prisma
-    const validRoles = ['SUPER_ADMIN', 'CLINIC_ADMIN', 'DOCTOR', 'ASSISTANT', 'PATIENT'];
-    if (!validRoles.includes(role)) {
-      return res.status(400).json({ error: 'Rol inválido. Roles permitidos: ' + validRoles.join(', ') });
+    if (!email || !password || !firstName || !lastName) {
+      return res.status(400).json({ error: 'Faltan campos obligatorios para el registro (email, password, firstName, lastName)' });
     }
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
@@ -44,54 +29,16 @@ export const register = async (req: Request, res: Response) => {
     // Utilizamos $transaction para asegurar atomicidad. Si falla la creación del perfil, 
     // el usuario no se crea, evitando usuarios "fantasma" sin perfil.
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Preparamos el payload base del modelo User
-      const userData: any = {
-        email,
-        passwordHash,
-        firstName,
-        lastName,
-        phone,
-        role,
-      };
-
-      // 2. Anidamos la creación del perfil especializado dependiendo del rol
-      if (role === 'DOCTOR') {
-        userData.doctorProfile = {
-          create: {
-            licenseNumber: licenseNumber || `TEMP-${Date.now()}`,
-            consultationPrice: consultationPrice ? Number(consultationPrice) : 0,
-            ...(clinicProfileId ? {
-              workplaces: {
-                create: [
-                  { clinicProfileId: clinicProfileId }
-                ]
-              }
-            } : {})
-          }
-        };
-      } else if (role === 'CLINIC_ADMIN') {
-        if (!name || !address) {
-          throw new Error('REQ_CLINIC_FIELDS'); // Lanzamos un error capturable si faltan campos
-        }
-        userData.clinicProfile = {
-          create: {
-            name,
-            address,
-          }
-        };
-      }
-      // Los roles SUPER_ADMIN, PATIENT, y ASSISTANT (si no requieren datos adicionales por ahora) 
-      // simplemente se crean como usuarios sin perfiles extendidos, tal como lo solicitaste.
-
-      // Configuramos el include para devolver el perfil creado en la respuesta (útil para el frontend)
-      const includeData: any = {};
-      if (role === 'DOCTOR') includeData.doctorProfile = { include: { workplaces: true } };
-      if (role === 'CLINIC_ADMIN') includeData.clinicProfile = true;
-
-      // 3. Ejecutamos la creación unificada
+      // 1. Creamos al usuario base
       const user = await tx.user.create({
-        data: userData,
-        include: Object.keys(includeData).length > 0 ? includeData : undefined
+        data: {
+          email,
+          passwordHash,
+          firstName,
+          lastName,
+          phone,
+          role: 'PATIENT',
+        }
       });
 
       return user;
@@ -104,15 +51,20 @@ export const register = async (req: Request, res: Response) => {
 
     // Generar el token con el ID y el nuevo Rol
     const token = generateToken({ id: result.id, role: result.role });
-    const userWithoutPassword = { ...result };
-    delete (userWithoutPassword as any).passwordHash;
+    
+    // Devolver un objeto usuario limpio para que el frontend no colapse al buscar relaciones vacías
+    const userWithoutPassword = { 
+      id: result.id,
+      email: result.email,
+      firstName: result.firstName,
+      lastName: result.lastName,
+      role: result.role,
+      phone: result.phone
+    };
 
     res.status(201).json({ user: userWithoutPassword, token });
   } catch (error: any) {
     console.error('[AuthController] Error en register:', error);
-    if (error.message === 'REQ_CLINIC_FIELDS') {
-      return res.status(400).json({ error: 'Para el rol CLINIC_ADMIN se requieren los campos name y address' });
-    }
     res.status(500).json({ error: 'Error al registrar el usuario' });
   }
 };
@@ -161,10 +113,11 @@ export const forgotPassword = async (req: Request, res: Response) => {
 
     const user = await prisma.user.findUnique({ where: { email } });
 
-    // Por seguridad, si el usuario no existe devolvemos 200 OK igual,
-    // o un 404 genérico como solicitaste para no revelar correos registrados.
+    const genericResponse = { message: 'Si el correo existe en nuestra base de datos, recibirás instrucciones de recuperación.' };
+
+    // Always return the same response to prevent account enumeration.
     if (!user) {
-      return res.status(404).json({ error: 'Si el correo existe en nuestra base de datos, recibirás un enlace de recuperación.' });
+      return res.status(200).json(genericResponse);
     }
 
     // Generar un token aleatorio de 6 dígitos numéricos para mayor facilidad de UX
@@ -186,7 +139,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
       console.error('[AuthController] Error silencioso al enviar correo de recuperación:', err);
     });
 
-    res.status(200).json({ message: 'Se han enviado las instrucciones a tu correo electrónico' });
+    res.status(200).json(genericResponse);
   } catch (error) {
     console.error('[AuthController] Error en forgotPassword:', error);
     res.status(500).json({ error: 'Error al procesar la solicitud de recuperación' });

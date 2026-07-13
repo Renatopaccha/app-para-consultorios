@@ -54,27 +54,7 @@ export const getUserById = async (req: Request, res: Response) => {
 };
 
 export const createUser = async (req: Request, res: Response) => {
-  try {
-    const { firstName, lastName, email } = req.body;
-    if (!firstName || !lastName || !email) {
-      return res.status(400).json({ error: 'Faltan campos requeridos (firstName, lastName, email)' });
-    }
-
-    const user = await prisma.user.create({ 
-      data: req.body,
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        phone: true,
-        role: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-    res.status(201).json(user);
-  } catch (error) {
-    res.status(500).json({ error: 'Error al crear usuario' });
-  }
+  // Internal role provisioning needs an audited administrative workflow.
+  // This endpoint remains protected but intentionally performs no unsafe creation.
+  res.status(501).json({ error: 'La creación administrativa de usuarios aún no está implementada.' });
 };

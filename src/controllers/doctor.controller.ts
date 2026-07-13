@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
+import { emailService } from '../services/email.service';
+import bcrypt from 'bcrypt';
 
 export const getDoctors = async (req: Request, res: Response) => {
   try {
@@ -11,14 +13,17 @@ export const getDoctors = async (req: Request, res: Response) => {
     const doctors = await prisma.doctorProfile.findMany({
       skip,
       take: limit,
-      include: {
+      select: {
+        id: true,
+        bio: true,
+        profileImageUrl: true,
+        consultationPrice: true,
+        languages: true,
         user: {
           select: {
             id: true,
             firstName: true,
             lastName: true,
-            email: true,
-            phone: true
           }
         },
         workplaces: {
@@ -33,7 +38,8 @@ export const getDoctors = async (req: Request, res: Response) => {
             }
           }
         },
-        specialties: true
+        specialties: { select: { id: true, name: true } },
+        services: { select: { id: true, name: true, description: true, price: true, duration: true } }
       }
     });
     res.json(doctors);
@@ -48,16 +54,13 @@ export const getDoctorById = async (req: Request, res: Response) => {
     const { id } = req.params;
     const doctor = await prisma.doctorProfile.findUnique({ 
       where: { id: id as string },
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-            phone: true
-          }
-        },
+      select: {
+        id: true,
+        bio: true,
+        profileImageUrl: true,
+        consultationPrice: true,
+        languages: true,
+        user: { select: { id: true, firstName: true, lastName: true } },
         workplaces: {
           where: { isActive: true },
           include: {
@@ -70,7 +73,8 @@ export const getDoctorById = async (req: Request, res: Response) => {
             }
           }
         },
-        specialties: true
+        specialties: { select: { id: true, name: true } },
+        services: { select: { id: true, name: true, description: true, price: true, duration: true } }
       }
     });
     if (!doctor) {
@@ -84,29 +88,7 @@ export const getDoctorById = async (req: Request, res: Response) => {
 };
 
 export const createDoctor = async (req: Request, res: Response) => {
-  try {
-    const { licenseNumber, consultationPrice, userId } = req.body;
-    if (!licenseNumber || consultationPrice === undefined || !userId) {
-      return res.status(400).json({ error: 'Faltan campos requeridos (licenseNumber, consultationPrice, userId)' });
-    }
-
-    const doctor = await prisma.doctorProfile.create({ 
-      data: req.body,
-      include: {
-        user: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true
-          }
-        }
-      }
-    });
-    res.status(201).json(doctor);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error al crear perfil de doctor' });
-  }
+  res.status(501).json({ error: 'El aprovisionamiento administrativo de médicos aún no está implementado.' });
 };
 
 export const getMyAppointments = async (req: AuthRequest, res: Response) => {
@@ -121,18 +103,22 @@ export const getMyAppointments = async (req: AuthRequest, res: Response) => {
     });
 
     if (!doctor) {
-      return res.status(404).json({ error: 'Perfil de doctor no encontrado' });
+      return res.status(200).json([]);
     }
 
-    const { date } = req.query;
+    const { date, startDate, endDate } = req.query;
     
     // Filtro base: todas las citas del doctor
     const whereClause: any = {
       doctorProfileId: doctor.id
     };
 
-    // Filtro opcional: si se envía date (YYYY-MM-DD), filtramos por ese día exacto
-    if (date && typeof date === 'string') {
+    if (startDate && typeof startDate === 'string' && endDate && typeof endDate === 'string') {
+      whereClause.startDatetime = {
+        gte: new Date(startDate),
+        lte: new Date(endDate)
+      };
+    } else if (date && typeof date === 'string' && date !== 'undefined') {
       const dateStart = new Date(`${date}T00:00:00.000Z`);
       const dateEnd = new Date(`${date}T23:59:59.999Z`);
       
@@ -165,13 +151,23 @@ export const getMyAppointments = async (req: AuthRequest, res: Response) => {
         },
         clinicProfile: {
           select: {
-            name: true
+            name: true,
+            color: true // <-- Vital para pintar el grid del frontend
           }
         }
       }
     });
 
-    res.status(200).json(appointments);
+    // Mapeamos las llaves al contrato que espera el Frontend (snake_case)
+    const mappedAppointments = appointments.map(appt => ({
+      ...appt,
+      payment_status: appt.paymentStatus,
+      appointment_type: appt.appointmentType,
+      start_datetime: appt.startDatetime,
+      patient_name: appt.patient ? `${appt.patient.firstName} ${appt.patient.lastName}` : null
+    }));
+
+    res.status(200).json(mappedAppointments);
   } catch (error) {
     console.error('[Doctor Controller] Error en getMyAppointments:', error);
     res.status(500).json({ error: 'Error al obtener la agenda del médico' });
@@ -320,6 +316,20 @@ export const addWorkSchedule = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'No tienes permisos para configurar horarios en esta clínica o la vinculación no está activa' });
     }
 
+    // Validar colisión de horarios: (A < D) y (B > C)
+    const conflictingSchedule = await prisma.workSchedule.findFirst({
+      where: {
+        weekday: parseInt(weekday),
+        workplace: { doctorProfileId: doctor.id },
+        startTime: { lt: endTime },
+        endTime: { gt: startTime }
+      }
+    });
+
+    if (conflictingSchedule) {
+      return res.status(400).json({ error: 'El horario seleccionado se solapa con un horario existente en otra clínica.' });
+    }
+
     // Crear el horario conectado al workplace
     const schedule = await prisma.workSchedule.create({
       data: {
@@ -342,7 +352,7 @@ export const getMySchedules = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
     const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
-    if (!doctor) return res.status(403).json({ error: 'No autorizado' });
+    if (!doctor) return res.status(200).json([]);
 
     const schedules = await prisma.workSchedule.findMany({
       where: {
@@ -357,3 +367,218 @@ export const getMySchedules = async (req: AuthRequest, res: Response) => {
   }
 };
 
+
+
+export const addAppointment = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'No autorizado' });
+
+    const doctor = await prisma.doctorProfile.findUnique({ 
+      where: { userId },
+      include: { user: true }
+    });
+    if (!doctor) return res.status(404).json({ error: 'Perfil no encontrado' });
+
+    const { clinicId, date, startTime, endTime, type, title, patientId, serviceId } = req.body;
+    if (!clinicId || !date || !startTime || !endTime) {
+      return res.status(400).json({ error: 'Faltan campos obligatorios' });
+    }
+
+    let finalPatientId = patientId;
+    let finalServiceId = serviceId;
+
+    if (type === 'bloqueo' || type === 'personal') {
+      // Create or find dummy patient for blocks
+      let dummyPatient = await prisma.user.findUnique({ where: { email: 'block@vitali.com' } });
+      if (!dummyPatient) {
+        dummyPatient = await prisma.user.create({
+          data: {
+            email: 'block@vitali.com',
+            passwordHash: 'dummy',
+            firstName: 'Bloqueo',
+            lastName: 'Sistema',
+            role: 'PATIENT'
+          }
+        });
+      }
+      finalPatientId = dummyPatient.id;
+
+      // Create or find dummy service
+      let dummyService = await prisma.service.findFirst({ where: { name: 'Bloqueo de Horario' } });
+      if (!dummyService) {
+        dummyService = await prisma.service.create({
+          data: {
+            name: 'Bloqueo de Horario',
+            duration: 60,
+            price: 0
+          }
+        });
+      }
+      finalServiceId = dummyService.id;
+    }
+
+    if (finalServiceId === 'temp-service-123') {
+      let tempS = await prisma.service.findFirst();
+      if (!tempS) {
+        tempS = await prisma.service.create({
+          data: {
+            name: 'Consulta Temporal',
+            duration: 30,
+            price: 50
+          }
+        });
+      }
+      finalServiceId = tempS.id;
+    }
+
+    if (!finalPatientId || !finalServiceId) {
+
+
+      return res.status(400).json({ error: 'patientId y serviceId son obligatorios para citas médicas' });
+    }
+
+    const appointment = await prisma.appointment.create({
+      data: {
+        patientId: finalPatientId,
+        doctorProfileId: doctor.id,
+        clinicProfileId: clinicId,
+        serviceId: finalServiceId,
+        date: new Date(date),
+        startTime,
+        endTime,
+        status: type === 'cita' ? 'CONFIRMED' : 'PENDING',
+        notes: title || type
+      }
+    });
+
+    if (type === 'cita') {
+      try {
+        const patientData = await prisma.user.findUnique({
+          where: { id: finalPatientId },
+          select: { email: true, firstName: true }
+        });
+        
+        const clinicData = await prisma.clinicProfile.findUnique({
+          where: { id: clinicId },
+          select: { name: true }
+        });
+
+        if (patientData && patientData.email && clinicData) {
+          const formattedDate = new Date(date).toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+          emailService.sendDoctorAppointmentConfirmation({
+            to: patientData.email,
+            patientName: patientData.firstName,
+            date: formattedDate,
+            time: startTime,
+            doctorName: doctor.user.firstName + ' ' + doctor.user.lastName,
+            clinicName: clinicData.name
+          }).catch(err => console.error("Error async email", err));
+        }
+      } catch (emailError) {
+        console.error("Error intentando enviar correo:", emailError);
+      }
+    }
+
+    res.status(201).json(appointment);
+  } catch (error) {
+    console.error('[Doctor Controller] Error en addAppointment:', error);
+    res.status(500).json({ error: 'Error al crear el registro' });
+  }
+};
+
+
+/**
+ * POST /api/doctors/patients/guest
+ * Crea una cuenta fantasma (Shadow Account) para pacientes sin registrar.
+ * Retorna el ID del usuario creado o del usuario existente.
+ */
+export const createGuestPatient = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'No autorizado' });
+
+    // Nota: Aunque recibamos "cedula", en el esquema actual Prisma User no tiene ese campo. 
+    // Filtraremos por email principalmente.
+    const { firstName, lastName, email, cedula } = req.body;
+
+    if (!firstName || !lastName || !email) {
+      return res.status(400).json({ error: 'firstName, lastName y email son obligatorios' });
+    }
+
+    // Anti-Enredo: Verificar si ya existe en BD
+    let existingUser = await prisma.user.findUnique({
+      where: { email }
+    });
+
+    if (existingUser) {
+      return res.status(200).json({ 
+        message: 'Paciente ya existe', 
+        patientId: existingUser.id 
+      });
+    }
+
+    // Crear Shadow Account
+    const randomPassword = Math.random().toString(36).slice(-10) + 'A1!'; // Contraseña segura aleatoria
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(randomPassword, salt);
+
+    const newUser = await prisma.user.create({
+      data: {
+        firstName,
+        lastName,
+        email,
+        passwordHash,
+        role: 'PATIENT'
+      }
+    });
+
+    return res.status(201).json({ 
+      message: 'Cuenta fantasma creada exitosamente', 
+      patientId: newUser.id 
+    });
+
+  } catch (error: any) {
+    console.error('[Doctor Controller] Error en createGuestPatient:', error);
+    res.status(500).json({ error: 'Error al crear la cuenta fantasma del paciente' });
+  }
+};
+
+/**
+ * GET /api/doctors/patients/search?q={query}
+ * Busca pacientes existentes por nombre, apellido o correo.
+ */
+export const searchPatients = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'No autorizado' });
+
+    const query = req.query.q as string;
+    if (!query || query.length < 2) {
+      return res.json([]);
+    }
+
+    const patients = await prisma.user.findMany({
+      where: {
+        role: 'PATIENT',
+        OR: [
+          { firstName: { contains: query, mode: 'insensitive' } },
+          { lastName: { contains: query, mode: 'insensitive' } },
+          { email: { contains: query, mode: 'insensitive' } }
+        ]
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true
+      },
+      take: 10
+    });
+
+    res.json(patients);
+  } catch (error) {
+    console.error('[Doctor Controller] Error en searchPatients:', error);
+    res.status(500).json({ error: 'Error al buscar pacientes' });
+  }
+};

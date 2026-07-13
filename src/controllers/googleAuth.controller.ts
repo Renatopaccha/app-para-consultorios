@@ -69,7 +69,7 @@ export const handleGoogleCallback = async (req: AuthRequest, res: Response) => {
         // Google no siempre devuelve el refresh_token si ya lo dio antes.
         // Solo lo actualizamos si viene uno nuevo, sino conservamos el existente.
         googleRefreshToken: tokens.refresh_token || doctor.googleRefreshToken, 
-        tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null
+        googleTokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null
       }
     });
 

@@ -21,7 +21,6 @@ export const getActiveDoctors = async (req: AuthRequest, res: Response) => {
       take: limit,
       select: {
         id: true,
-        licenseNumber: true,
         isVerified: true,
         consultationPrice: true,
         workplaces: {

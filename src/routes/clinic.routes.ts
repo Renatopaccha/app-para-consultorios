@@ -12,15 +12,14 @@ import { authenticate, requireRole } from '../middlewares/auth.middleware';
 
 const router = Router();
 
+// --- Rutas de Médico Híbrido ---
+// Obtener las clínicas del médico autenticado (Debe ir ANTES de /:id para evitar conflicto)
+router.get('/my-clinics', authenticate, requireRole(['DOCTOR']), getMyClinics);
+
 // Rutas básicas existentes
 router.get('/', getClinics);
 router.get('/:id', getClinicById);
-router.post('/', createClinic);
-
-// --- Rutas de Médico Híbrido ---
-
-// Obtener las clínicas del médico autenticado
-router.get('/my-clinics', authenticate, requireRole(['DOCTOR']), getMyClinics);
+router.post('/', authenticate, requireRole(['SUPER_ADMIN']), createClinic);
 
 
 // Listar doctores de una clínica específica (Pública para que los pacientes puedan ver el directorio)

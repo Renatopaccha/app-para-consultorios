@@ -1,6 +1,7 @@
-import express, { Application, Request, Response } from 'express';
+import express, { Application, ErrorRequestHandler, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import helmet from 'helmet';
 
 import authRoutes from './routes/auth.routes';
 import userRoutes from './routes/user.routes';
@@ -23,10 +24,15 @@ import './jobs/reminder.job';
 dotenv.config();
 
 const app: Application = express();
+const allowedOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 // Middlewares globales
-app.use(cors());
-app.use(express.json());
+app.use(helmet());
+app.use(cors({ origin: allowedOrigins.length > 0 ? allowedOrigins : false }));
+app.use(express.json({ limit: '1mb' }));
 
 // Rutas de prueba
 app.get('/', (req: Request, res: Response) => {
@@ -47,5 +53,13 @@ app.use('/api/calendar', calendarRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/assistant', assistantRoutes);
 app.use('/api/profile', profileRoutes);
+
+const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
+  console.error('[API] Unhandled request error:', error instanceof Error ? error.message : error);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Error interno del servidor' });
+};
+
+app.use(errorHandler);
 
 export default app;
