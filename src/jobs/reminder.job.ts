@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import prisma from '../prisma';
 import { notificationService } from '../services/notification.service';
 import { deleteCalendarEvent } from '../services/calendarSync.service';
+import { expirePendingConfirmations } from '../services/appointmentConfirmation.service';
 
 const logTimestamp = () => new Date().toISOString();
 
@@ -60,16 +61,10 @@ cron.schedule('* * * * *', async () => {
 
       const pinText = appointment.verificationCode ? ` Tu PIN de pago en caja es: ${appointment.verificationCode}.` : '';
 
-      // AUTO-CANCELACIÓN: Si faltan <= 12h y el paciente no ha confirmado
-      if (hoursUntilAppointment <= 12.00 && !appointment.isPatientConfirmed && appointment.status === 'PENDING') {
+      // The deadline/confirmation state, never payment, controls auto-cancellation.
+      if (appointment.patientConfirmationStatus === 'PENDING' && appointment.confirmationDeadlineAt && appointment.confirmationDeadlineAt <= now && ['PENDING', 'CONFIRMED'].includes(appointment.status)) {
         // Cancelar en BD
-        await prisma.appointment.update({
-          where: { id: appointment.id },
-          data: {
-            status: 'CANCELLED',
-            cancellationReason: 'Cancelación automática: El paciente no confirmó su asistencia en el tiempo límite.'
-          }
-        });
+        await expirePendingConfirmations(now);
 
         // Liberar agenda de Google/Outlook
         deleteCalendarEvent(appointment.id).catch(console.error);

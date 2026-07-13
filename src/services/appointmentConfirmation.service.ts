@@ -17,3 +17,19 @@ export async function confirmPatientAppointment(id: string, userId: string) {
     return updated;
   });
 }
+
+/** Idempotent worker entry point; payment state is deliberately ignored. */
+export async function expirePendingConfirmations(now = new Date()): Promise<number> {
+  const expired = await prisma.appointment.findMany({ where: { patientConfirmationStatus: 'PENDING', confirmationDeadlineAt: { lte: now }, status: { in: ['PENDING', 'CONFIRMED'] } } });
+  let count = 0;
+  for (const appointment of expired) {
+    const changed = await prisma.$transaction(async tx => {
+      const updated = await tx.appointment.updateMany({ where: { id: appointment.id, patientConfirmationStatus: 'PENDING', status: { in: ['PENDING', 'CONFIRMED'] } }, data: { status: 'CANCELLED', patientConfirmationStatus: 'EXPIRED', cancelledAt: now, cancellationReason: 'PATIENT_CONFIRMATION_EXPIRED' } });
+      if (updated.count !== 1) return false;
+      await tx.appointmentChangeLog.create({ data: { appointmentId: appointment.id, changedByUserId: 'system', changeType: 'CANCELLED', previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, newStartsAt: appointment.startsAt, newEndsAt: appointment.endsAt, previousStatus: appointment.status, newStatus: 'CANCELLED', reason: 'PATIENT_CONFIRMATION_EXPIRED' } });
+      return true;
+    });
+    if (changed) count++;
+  }
+  return count;
+}
