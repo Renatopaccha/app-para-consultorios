@@ -174,7 +174,7 @@ describe('snapshot monetario con PostgreSQL real', () => {
     const confirmed = await request(app).patch(`/api/bookings/${created.body.id}/confirm-attendance`).set('Authorization', `Bearer ${patientToken}`).send({}).expect(200);
     expect(confirmed.headers.deprecation).toBe('true');
     expect(confirmed.body).toMatchObject({ patientConfirmationStatus: 'CONFIRMED', paymentStatus: 'PENDING_CASH', status: 'PENDING' });
-    const paid = await request(app).post('/api/bookings/verify-payment').set('Authorization', `Bearer ${doctorToken}`).send({ verificationCode: created.body.verificationCode }).expect(200);
+    const paid = await request(app).post('/api/bookings/verify-payment').set('Authorization', `Bearer ${doctorToken}`).send({ verificationCode: created.body.cashPaymentCode }).expect(200);
     expect(paid.headers.deprecation).toBe('true');
     expect(paid.body.appointment).toMatchObject({ paymentStatus: 'PAID', status: 'PENDING', patientConfirmationStatus: 'CONFIRMED' });
     await prisma.appointment.update({ where: { id: created.body.id }, data: { confirmationDeadlineAt: new Date('2020-01-01T00:00:00.000Z') } });

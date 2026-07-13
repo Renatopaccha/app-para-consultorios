@@ -9,6 +9,13 @@ const forbidden = [
   'prisma.appointment.upsert(',
   'prisma.appointmentTurn.create(',
   'prisma.appointmentTurn.update(',
+  'prisma.payment.create(',
+  'prisma.payment.update(',
+  'prisma.payment.updateMany(',
+  'prisma.payment.upsert(',
+  'prisma.paymentEvent.create(',
+  'prisma.paymentEvent.update(',
+  'prisma.paymentEvent.delete(',
 ];
 
 function controllerFiles(directory: string): string[] {

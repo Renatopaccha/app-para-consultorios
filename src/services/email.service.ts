@@ -17,9 +17,12 @@ const roleTranslations: Record<string, string> = {
 
 export type InvitationEmail = { to: string; role: string; token: string; expiresAt: Date };
 export type InvitationEmailAdapter = (email: InvitationEmail) => Promise<void>;
+export type CashPaymentCodeEmail = { to: string; code: string; doctorName: string; clinicName: string; serviceName: string; startsAt: Date; amountCents: number; currency: string };
+export type CashPaymentCodeEmailAdapter = (email: CashPaymentCodeEmail) => Promise<void>;
 
 // Integration tests use this in-memory adapter; production always calls Resend.
 let invitationEmailAdapter: InvitationEmailAdapter | undefined;
+let cashPaymentCodeEmailAdapter: CashPaymentCodeEmailAdapter | undefined;
 
 export function setInvitationEmailAdapterForTests(adapter: InvitationEmailAdapter | undefined): void {
   if (process.env.NODE_ENV !== 'test') {
@@ -28,7 +31,24 @@ export function setInvitationEmailAdapterForTests(adapter: InvitationEmailAdapte
   invitationEmailAdapter = adapter;
 }
 
+export function setCashPaymentCodeEmailAdapterForTests(adapter: CashPaymentCodeEmailAdapter | undefined): void {
+  if (process.env.NODE_ENV !== 'test') throw new Error('El adaptador de correo de pruebas solo está disponible en NODE_ENV=test.');
+  cashPaymentCodeEmailAdapter = adapter;
+}
+
 export const emailService = {
+
+  async sendCashPaymentCodeEmail(email: CashPaymentCodeEmail) {
+    if (cashPaymentCodeEmailAdapter) return cashPaymentCodeEmailAdapter(email);
+    if (process.env.NODE_ENV === 'test') return;
+    const amount = (email.amountCents / 100).toFixed(2);
+    await resend.emails.send({
+      from: FROM_EMAIL,
+      to: email.to,
+      subject: 'Código para registrar tu pago en efectivo - Zenda',
+      html: `<h2>Pago en efectivo</h2><p>Presenta este código al pagar: <strong>${email.code}</strong></p><ul><li>Médico: ${email.doctorName}</li><li>Clínica: ${email.clinicName}</li><li>Servicio: ${email.serviceName}</li><li>Fecha: ${email.startsAt.toLocaleString('es-EC')}</li><li>Importe: ${email.currency} ${amount}</li></ul><p>No compartas este código fuera del consultorio.</p>`,
+    });
+  },
 
   async sendInvitationEmail(to: string, role: string, invitationToken: string, expiresAt: Date) {
     if (invitationEmailAdapter) {

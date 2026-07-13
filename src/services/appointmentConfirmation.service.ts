@@ -1,5 +1,6 @@
 import prisma from '../prisma';
 import { BookingError } from './appointmentBooking.service';
+import { cancelCashPaymentForAppointment } from './cashPayment.service';
 
 export function confirmationDeadline(startsAt: Date): Date {
   const cutoff = Number(process.env.APPOINTMENT_CONFIRMATION_CUTOFF_HOURS || 12) * 3600_000;
@@ -27,6 +28,7 @@ export async function expirePendingConfirmations(now = new Date()): Promise<numb
       const updated = await tx.appointment.updateMany({ where: { id: appointment.id, patientConfirmationStatus: 'PENDING', status: { in: ['PENDING', 'CONFIRMED'] } }, data: { status: 'CANCELLED', patientConfirmationStatus: 'EXPIRED', cancelledAt: now, cancellationReason: 'PATIENT_CONFIRMATION_EXPIRED' } });
       if (updated.count !== 1) return false;
       await tx.appointmentChangeLog.create({ data: { appointmentId: appointment.id, changedByUserId: 'system', changeType: 'CANCELLED', previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, newStartsAt: appointment.startsAt, newEndsAt: appointment.endsAt, previousStatus: appointment.status, newStatus: 'CANCELLED', reason: 'PATIENT_CONFIRMATION_EXPIRED' } });
+      await cancelCashPaymentForAppointment(tx, appointment.id, null, appointment.clinicProfileId, 'PATIENT_CONFIRMATION_EXPIRED');
       return true;
     });
     if (changed) count++;

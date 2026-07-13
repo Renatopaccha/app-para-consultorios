@@ -167,14 +167,15 @@ export const verifyCashPayment = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
     if (typeof verificationCode !== 'string' || !verificationCode) return res.status(400).json({ error: 'VERIFICATION_CODE_REQUIRED' });
     deprecated(res, '/api/payments/cash (pending Payment module)');
-    const updatedAppointment = await confirmLegacyCashPayment(verificationCode, legacyActor(req));
+    const result = await confirmLegacyCashPayment(verificationCode, legacyActor(req), req.ip || req.socket.remoteAddress || 'unknown');
 
     // Actualizamos el evento en el calendario para quitar el tag de "Pago Pendiente"
-    updateCalendarEventStatus(updatedAppointment.id).catch(console.error);
+    updateCalendarEventStatus(result.appointment.id).catch(console.error);
 
     res.status(200).json({
       message: 'Pago confirmado exitosamente. La cita ha sido asegurada.',
-      appointment: updatedAppointment
+      appointment: result.appointment,
+      payment: result.payment
     });
 
   } catch (error) {
@@ -235,7 +236,8 @@ export const getAppointments = async (req: AuthRequest, res: Response) => {
       where: { doctorProfileId: doctor.id },
       include: {
         patient: { select: { id: true, firstName: true, lastName: true } },
-        turn: true
+        turn: true,
+        cashPayment: { select: { status: true } }
       }
     });
 

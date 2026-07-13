@@ -2,8 +2,9 @@ import { Prisma } from '../../generated/prisma';
 import prisma from '../prisma';
 import { buildServiceSnapshot } from './serviceSnapshot.service';
 import { localDate, localDateTimeToUtc, localTime, minutes, parseRequestedStart } from '../utils/scheduling';
-import crypto from 'crypto';
 import { confirmationDeadline } from './appointmentConfirmation.service';
+import { cancelCashPaymentForAppointment, createCashPaymentForAppointment, rescheduleCashPaymentForAppointment } from './cashPayment.service';
+import { emailService } from './email.service';
 
 export class BookingError extends Error { constructor(public code: string, public status: number, message: string) { super(message); } }
 const occupied = ['PENDING', 'CONFIRMED', 'IN_PROGRESS'] as const;
@@ -12,11 +13,11 @@ export async function createAppointment(input: { patientUserId: string; doctorId
   const startsAt = parseRequestedStart(input.requestedStart);
   if (startsAt <= new Date()) throw new BookingError('INVALID_START', 400, 'El horario debe ser futuro.');
   try {
-    return await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${input.doctorId}))`;
       const [patient, doctor, clinic, service, workplace] = await Promise.all([
         tx.user.findUnique({ where: { id: input.patientUserId } }),
-        tx.doctorProfile.findUnique({ where: { id: input.doctorId } }), tx.clinicProfile.findUnique({ where: { id: input.clinicId } }),
+        tx.doctorProfile.findUnique({ where: { id: input.doctorId }, include: { user: { select: { firstName: true, lastName: true } } } }), tx.clinicProfile.findUnique({ where: { id: input.clinicId } }),
         tx.service.findUnique({ where: { id: input.serviceId } }),
         tx.doctorClinicWorkplace.findUnique({ where: { doctorProfileId_clinicProfileId: { doctorProfileId: input.doctorId, clinicProfileId: input.clinicId } } }),
       ]);
@@ -33,9 +34,14 @@ export async function createAppointment(input: { patientUserId: string; doctorId
       if (!withinSchedule) throw new BookingError('OUTSIDE_WORKING_HOURS', 422, 'El horario está fuera de la jornada.');
       const block = await tx.scheduleBlock.findFirst({ where: { doctorProfileId: doctor.id, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } } });
       if (block) throw new BookingError('APPOINTMENT_TIME_CONFLICT', 409, 'El horario seleccionado ya no está disponible.');
-      const paymentMethod = input.paymentMethod === 'CASH' ? 'CASH' : 'NONE';
-      return tx.appointment.create({ data: { patientId: patient.id, doctorProfileId: doctor.id, clinicProfileId: clinic.id, serviceId: service.id, date: localDateTimeToUtc(localDate(startsAt), '00:00'), startTime: localTime(startsAt), endTime: localTime(endsAt), startDatetime: startsAt, startsAt, endsAt, confirmationDeadlineAt: confirmationDeadline(startsAt), status: paymentMethod === 'NONE' || snapshot.servicePriceCentsSnapshot === 0 ? 'CONFIRMED' : 'PENDING', paymentMethod, paymentStatus: paymentMethod === 'CASH' ? 'PENDING_CASH' : 'PAID', verificationCode: paymentMethod === 'CASH' ? crypto.randomBytes(3).toString('hex').toUpperCase() : null, ...snapshot } });
+      const paymentMethod = input.paymentMethod === 'CASH' && snapshot.servicePriceCentsSnapshot > 0 ? 'CASH' : 'NONE';
+      const appointment = await tx.appointment.create({ data: { patientId: patient.id, doctorProfileId: doctor.id, clinicProfileId: clinic.id, serviceId: service.id, date: localDateTimeToUtc(localDate(startsAt), '00:00'), startTime: localTime(startsAt), endTime: localTime(endsAt), startDatetime: startsAt, startsAt, endsAt, confirmationDeadlineAt: confirmationDeadline(startsAt), status: paymentMethod === 'NONE' ? 'CONFIRMED' : 'PENDING', paymentMethod, paymentStatus: paymentMethod === 'CASH' ? 'PENDING_CASH' : 'PAID', verificationCode: null, ...snapshot } });
+      if (paymentMethod !== 'CASH') return { appointment, cashPayment: null, code: null, email: null };
+      const createdPayment = await createCashPaymentForAppointment(tx, appointment);
+      return { appointment, cashPayment: { id: createdPayment.payment.id, status: createdPayment.payment.status, amountCents: createdPayment.payment.amountCents, currency: createdPayment.payment.currency, codeExpiresAt: createdPayment.payment.codeExpiresAt }, code: createdPayment.code, email: { to: patient.email, doctorName: `${doctor.user.firstName} ${doctor.user.lastName}`.trim(), clinicName: clinic.name, serviceName: snapshot.serviceNameSnapshot, startsAt, amountCents: createdPayment.payment.amountCents, currency: createdPayment.payment.currency } };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    if (result.email && result.code) await emailService.sendCashPaymentCodeEmail({ ...result.email, code: result.code }).catch(() => undefined);
+    return { ...result.appointment, cashPayment: result.cashPayment, cashPaymentCode: result.code };
   } catch (error) {
     if (error instanceof BookingError) throw error;
     if (error instanceof Prisma.PrismaClientKnownRequestError || String(error).includes('Appointment_no_active_doctor_overlap') || String(error).includes('23P01')) throw new BookingError('APPOINTMENT_TIME_CONFLICT', 409, 'El horario seleccionado ya no está disponible.');
@@ -51,6 +57,7 @@ export async function cancelAppointment(appointmentId: string, actorId: string, 
     if (appointment.status === 'CANCELLED') return appointment;
     const updated = await tx.appointment.update({ where: { id: appointment.id }, data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByUserId: actorId, cancellationReason: reason || null } });
     await tx.appointmentChangeLog.create({ data: { appointmentId, changedByUserId: actorId, changeType: 'CANCELLED', previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, newStartsAt: appointment.startsAt, newEndsAt: appointment.endsAt, previousStatus: appointment.status, newStatus: 'CANCELLED', reason: reason || null } });
+    await cancelCashPaymentForAppointment(tx, appointmentId, actorId, appointment.clinicProfileId, reason);
     return updated;
   });
 }
@@ -72,6 +79,8 @@ export async function rescheduleAppointment(appointmentId: string, actorId: stri
     const changed = await tx.appointment.updateMany({ where: { id: appointment.id, startsAt: appointment.startsAt, endsAt: appointment.endsAt }, data: { previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, startsAt, endsAt, startDatetime: startsAt, date: localDateTimeToUtc(localDate(startsAt), '00:00'), startTime: localTime(startsAt), endTime: localTime(endsAt) } });
     if (changed.count !== 1) throw new BookingError('APPOINTMENT_TIME_CONFLICT', 409, 'La cita fue modificada simultáneamente.');
     const updated = await tx.appointment.findUniqueOrThrow({ where: { id: appointment.id } });
-    await tx.appointmentChangeLog.create({ data: { appointmentId, changedByUserId: actorId, changeType: 'RESCHEDULED', previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, newStartsAt: startsAt, newEndsAt: endsAt, previousStatus: appointment.status, newStatus: appointment.status } }); return updated;
+    await tx.appointmentChangeLog.create({ data: { appointmentId, changedByUserId: actorId, changeType: 'RESCHEDULED', previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, newStartsAt: startsAt, newEndsAt: endsAt, previousStatus: appointment.status, newStatus: appointment.status } });
+    await rescheduleCashPaymentForAppointment(tx, appointmentId, endsAt, actorId, appointment.clinicProfileId);
+    return updated;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }); } catch (error) { if (error instanceof BookingError) throw error; if ((error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') || String(error).includes('Appointment_no_active_doctor_overlap') || String(error).includes('23P01')) throw new BookingError('APPOINTMENT_TIME_CONFLICT', 409, 'El horario seleccionado ya no está disponible.'); throw error; }
 }

@@ -32,6 +32,32 @@ enum PaymentStatus {
   REFUNDED // Retenido por compatibilidad con datos existentes
 }
 
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+}
+
+enum CashPaymentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  REFUNDED
+  EXEMPTED
+}
+
+enum PaymentEventType {
+  CREATED
+  CODE_REISSUED
+  LOOKUP_SUCCEEDED
+  LOOKUP_FAILED
+  CONFIRMED
+  CANCELLED
+  CANCELLED_AFTER_CONFIRMATION_REQUIRES_REVIEW
+  REFUND_MARKED
+  STATUS_CHANGED
+}
+
 enum AppointmentType {
   IN_PERSON
   TELEMEDICINE
@@ -117,10 +143,14 @@ model User {
   assistantProfile AssistantProfile?
 
   // Relaciones
-  appointmentsAsPatient Appointment[] @relation("PatientAppointments")
-  reviewsGiven          Review[]      @relation("PatientReviews")
-  securityLogs          SecurityLog[]
-  invitationsCreated    Invitation[]  @relation("InvitationsCreated")
+  appointmentsAsPatient       Appointment[]                @relation("PatientAppointments")
+  reviewsGiven                Review[]                     @relation("PatientReviews")
+  securityLogs                SecurityLog[]
+  invitationsCreated          Invitation[]                 @relation("InvitationsCreated")
+  paymentsConfirmed           Payment[]                    @relation("PaymentConfirmedBy")
+  paymentEvents               PaymentEvent[]               @relation("PaymentEventActor")
+  paymentIdempotencyKeys      PaymentIdempotencyKey[]
+  paymentVerificationAttempts PaymentVerificationAttempt[] @relation("PaymentAttemptActor")
 
   @@index([email])
   @@index([resetPasswordToken])
@@ -182,6 +212,8 @@ model ClinicProfile {
   services          Service[]
   scheduleBlocks    ScheduleBlock[]
   invitations       Invitation[]            @relation("ClinicInvitations")
+  confirmedPayments Payment[]               @relation("PaymentConfirmedClinic")
+  paymentEvents     PaymentEvent[]          @relation("PaymentEventClinic")
 
   @@index([latitude, longitude])
   @@index([subscriptionStatus])
@@ -382,6 +414,7 @@ model Appointment {
   review        Review?
   changeLogs    AppointmentChangeLog[]
   turn          AppointmentTurn?
+  cashPayment   Payment?
 
   @@index([patientId])
   @@index([doctorProfileId])
@@ -390,6 +423,92 @@ model Appointment {
   @@index([date])
   @@index([status])
   @@index([startsAt])
+}
+
+model Payment {
+  id                         String            @id @default(uuid())
+  appointmentId              String            @unique
+  method                     PaymentMethod
+  status                     CashPaymentStatus @default(PENDING)
+  amountCents                Int
+  currency                   Currency
+  verificationCodeHash       String?           @unique
+  verificationCodeLast4      String?
+  codeExpiresAt              DateTime          @db.Timestamptz(3)
+  failedVerificationAttempts Int               @default(0)
+  lockedUntil                DateTime?         @db.Timestamptz(3)
+  confirmedAt                DateTime?         @db.Timestamptz(3)
+  confirmedByUserId          String?
+  confirmedClinicId          String?
+  cancelledAt                DateTime?         @db.Timestamptz(3)
+  cancellationReason         String?
+  requiresReview             Boolean           @default(false)
+  createdAt                  DateTime          @default(now())
+  updatedAt                  DateTime          @updatedAt
+
+  appointment          Appointment                  @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  confirmedBy          User?                        @relation("PaymentConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+  confirmedClinic      ClinicProfile?               @relation("PaymentConfirmedClinic", fields: [confirmedClinicId], references: [id], onDelete: SetNull)
+  events               PaymentEvent[]
+  idempotencyKeys      PaymentIdempotencyKey[]
+  verificationAttempts PaymentVerificationAttempt[]
+
+  @@index([status, method])
+  @@index([confirmedAt])
+  @@index([codeExpiresAt])
+  @@index([confirmedClinicId])
+}
+
+model PaymentEvent {
+  id             String             @id @default(uuid())
+  paymentId      String
+  eventType      PaymentEventType
+  previousStatus CashPaymentStatus?
+  newStatus      CashPaymentStatus?
+  actorUserId    String?
+  clinicId       String?
+  metadata       Json?
+  createdAt      DateTime           @default(now())
+
+  payment Payment        @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  actor   User?          @relation("PaymentEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  clinic  ClinicProfile? @relation("PaymentEventClinic", fields: [clinicId], references: [id], onDelete: SetNull)
+
+  @@index([paymentId, createdAt])
+  @@index([eventType, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model PaymentIdempotencyKey {
+  id           String   @id @default(uuid())
+  key          String
+  scope        String
+  userId       String
+  paymentId    String
+  responseBody Json?
+  createdAt    DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@unique([key, scope, userId])
+  @@index([paymentId, createdAt])
+}
+
+model PaymentVerificationAttempt {
+  id          String   @id @default(uuid())
+  paymentId   String?
+  actorUserId String?
+  ipHash      String
+  success     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  actor   User?    @relation("PaymentAttemptActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId, createdAt])
+  @@index([ipHash, createdAt])
+  @@index([paymentId, createdAt])
 }
 
 model AppointmentTurn {

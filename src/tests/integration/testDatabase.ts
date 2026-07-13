@@ -16,6 +16,10 @@ export async function clearIntegrationDatabase(): Promise<void> {
   await prisma.$transaction([
     prisma.invitation.deleteMany(),
     prisma.review.deleteMany(),
+    prisma.paymentVerificationAttempt.deleteMany(),
+    prisma.paymentIdempotencyKey.deleteMany(),
+    prisma.paymentEvent.deleteMany(),
+    prisma.payment.deleteMany(),
     prisma.appointmentTurn.deleteMany(),
     prisma.appointmentChangeLog.deleteMany(),
     prisma.appointment.deleteMany(),

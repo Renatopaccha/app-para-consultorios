@@ -34,4 +34,4 @@ export async function rescheduleCanonical(req: AuthRequest, res: Response) { if 
 export async function confirmCanonical(req: AuthRequest, res: Response) { if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' }); try { return res.json(await confirmPatientAppointment(String(req.params.id), req.user.id)); } catch (error) { return respond(error, res); } }
 /** Legacy alias kept for older mobile clients. Canonical route: PATCH /api/bookings/:id/confirm. */
 export async function confirmAttendanceLegacy(req: AuthRequest, res: Response) { res.setHeader('Deprecation', 'true'); res.setHeader('Link', '</api/bookings/:id/confirm>; rel="successor-version"'); return confirmCanonical(req, res); }
-export function calendarPresentation(appointment: { status: string; patientConfirmationStatus: string; paymentStatus: string }) { return getAppointmentCalendarPresentation(appointment); }
+export function calendarPresentation(appointment: { status: string; patientConfirmationStatus: string; paymentStatus: string; cashPayment?: { status: string } | null }) { return getAppointmentCalendarPresentation(appointment); }

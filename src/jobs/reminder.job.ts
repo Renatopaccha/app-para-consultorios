@@ -59,7 +59,8 @@ cron.schedule('* * * * *', async () => {
       let reminderTitle = '';
       let reminderBody = '';
 
-      const pinText = appointment.verificationCode ? ` Tu PIN de pago en caja es: ${appointment.verificationCode}.` : '';
+      // Payment codes are non-recoverable; a lost code must be reissued by the payment domain.
+      const pinText = '';
 
       // The deadline/confirmation state, never payment, controls auto-cancellation.
       if (appointment.patientConfirmationStatus === 'PENDING' && appointment.confirmationDeadlineAt && appointment.confirmationDeadlineAt <= now && ['PENDING', 'CONFIRMED'].includes(appointment.status)) {
