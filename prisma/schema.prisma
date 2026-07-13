@@ -278,13 +278,13 @@ model Appointment {
   clinicProfileId String
   serviceId       String
 
-  date      DateTime
-  startTime String
-  endTime   String
-  startDatetime DateTime? @db.Timestamptz // Fecha y hora con zona horaria integrada
-  status    AppointmentStatus @default(PENDING)
-  appointmentType AppointmentType @default(IN_PERSON)
-  notes     String?
+  date            DateTime
+  startTime       String
+  endTime         String
+  startDatetime   DateTime?         @db.Timestamptz // Fecha y hora con zona horaria integrada
+  status          AppointmentStatus @default(PENDING)
+  appointmentType AppointmentType   @default(IN_PERSON)
+  notes           String?
 
   // Pagos
   paymentMethod      String        @default("NONE")
@@ -380,8 +380,8 @@ model Certification {
 }
 
 model WorkSchedule {
-  id        String @id @default(uuid())
-  weekday   Int    // ISO: 0 = Lunes y 6 = Domingo
+  id        String  @id @default(uuid())
+  weekday   Int // ISO: 0 = Lunes y 6 = Domingo
   timezone  String? // ej: "America/Guayaquil"
   startTime String // Formato "HH:MM", ej: "08:00"
   endTime   String // Formato "HH:MM", ej: "12:00"
