@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
-import { register, login, forgotPassword, resetPassword } from '../controllers/auth.controller';
+import { register, login, forgotPassword, resetPassword, me, verifyEmail } from '../controllers/auth.controller';
 import { acceptInvitation, validateInvitation } from '../controllers/invitation.controller';
+import { authenticate } from '../middlewares/auth.middleware';
 
 const router = Router();
 const authLimiter = rateLimit({
@@ -17,6 +18,8 @@ const authLimiter = rateLimit({
 // Rutas principales
 router.post('/register', register);
 router.post('/login', authLimiter, login);
+router.get('/me', authenticate, me);
+router.post('/verify-email', authLimiter, verifyEmail);
 
 // Rutas de Recuperación de Contraseña
 router.post('/forgot-password', authLimiter, forgotPassword);

@@ -1,11 +1,23 @@
 import { Router } from 'express';
 import { getDoctors, getDoctorById, createDoctor, getMyAppointments, updateDoctorProfile, addService, addCertification, addWorkSchedule, getMySchedules, addAppointment, createGuestPatient, searchPatients } from '../controllers/doctor.controller';
 import { authenticate, requireRole } from '../middlewares/auth.middleware';
+import { createMyDoctorService, getMyDoctorProfile, listMyDoctorServices, patchMyDoctorProfile, patchMyDoctorService, patchMyDoctorServiceStatus } from '../controllers/doctorManagement.controller';
+import { correctInvitedPatientEmail, createMyAppointment, getMyWorkSchedules, putMyWorkSchedules } from '../controllers/doctorSchedule.controller';
 
 const router = Router();
 
 // Rutas protegidas (Dashboard del doctor)
 router.get('/my-appointments', authenticate, requireRole(['DOCTOR']), getMyAppointments);
+router.get('/me/profile', authenticate, requireRole(['DOCTOR']), getMyDoctorProfile);
+router.patch('/me/profile', authenticate, requireRole(['DOCTOR']), patchMyDoctorProfile);
+router.get('/me/services', authenticate, requireRole(['DOCTOR']), listMyDoctorServices);
+router.post('/me/services', authenticate, requireRole(['DOCTOR']), createMyDoctorService);
+router.patch('/me/services/:serviceId', authenticate, requireRole(['DOCTOR']), patchMyDoctorService);
+router.patch('/me/services/:serviceId/status', authenticate, requireRole(['DOCTOR']), patchMyDoctorServiceStatus);
+router.get('/me/work-schedules', authenticate, requireRole(['DOCTOR']), getMyWorkSchedules);
+router.put('/me/work-schedules', authenticate, requireRole(['DOCTOR']), putMyWorkSchedules);
+router.post('/me/appointments', authenticate, requireRole(['DOCTOR']), createMyAppointment);
+router.patch('/me/appointments/:id/invited-patient', authenticate, requireRole(['DOCTOR']), correctInvitedPatientEmail);
 router.put('/profile', authenticate, requireRole(['DOCTOR']), updateDoctorProfile);
 router.post('/services', authenticate, requireRole(['DOCTOR']), addService);
 router.post('/certifications', authenticate, requireRole(['DOCTOR']), addCertification);

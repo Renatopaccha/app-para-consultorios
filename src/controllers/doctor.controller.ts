@@ -499,54 +499,9 @@ export const addAppointment = async (req: AuthRequest, res: Response) => {
  * Retorna el ID del usuario creado o del usuario existente.
  */
 export const createGuestPatient = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'No autorizado' });
-
-    // Nota: Aunque recibamos "cedula", en el esquema actual Prisma User no tiene ese campo. 
-    // Filtraremos por email principalmente.
-    const { firstName, lastName, email, cedula } = req.body;
-
-    if (!firstName || !lastName || !email) {
-      return res.status(400).json({ error: 'firstName, lastName y email son obligatorios' });
-    }
-
-    // Anti-Enredo: Verificar si ya existe en BD
-    let existingUser = await prisma.user.findUnique({
-      where: { email }
-    });
-
-    if (existingUser) {
-      return res.status(200).json({ 
-        message: 'Paciente ya existe', 
-        patientId: existingUser.id 
-      });
-    }
-
-    // Crear Shadow Account
-    const randomPassword = Math.random().toString(36).slice(-10) + 'A1!'; // Contraseña segura aleatoria
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(randomPassword, salt);
-
-    const newUser = await prisma.user.create({
-      data: {
-        firstName,
-        lastName,
-        email,
-        passwordHash,
-        role: 'PATIENT'
-      }
-    });
-
-    return res.status(201).json({ 
-      message: 'Cuenta fantasma creada exitosamente', 
-      patientId: newUser.id 
-    });
-
-  } catch (error: any) {
-    console.error('[Doctor Controller] Error en createGuestPatient:', error);
-    res.status(500).json({ error: 'Error al crear la cuenta fantasma del paciente' });
-  }
+  // Kept as a legacy route so old clients receive an explicit migration signal,
+  // never a silently-created account with an unknown password.
+  return res.status(410).json({ error: 'GUEST_PATIENT_ENDPOINT_RETIRED', message: 'Usa POST /api/doctors/me/appointments con patient.email para enviar una invitación segura.' });
 };
 
 /**

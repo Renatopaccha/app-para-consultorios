@@ -7,13 +7,14 @@ cloudinary.config({
 });
 
 export const imageService = {
-  uploadImage: async (fileBuffer: Buffer, folder: string): Promise<string> => {
+  uploadImage: async (fileBuffer: Buffer, folder: string, publicId?: string): Promise<string> => {
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { 
+        {
           folder,
           format: 'webp',
-          quality: 'auto'
+          quality: 'auto',
+          ...(publicId ? { public_id: publicId, overwrite: true, invalidate: true } : {}),
         },
         (error, result) => {
           if (error) return reject(error);

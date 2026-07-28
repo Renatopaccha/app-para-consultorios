@@ -27,6 +27,7 @@ export const startCronJobs = () => {
         },
         include: {
           patient: true,
+          patientInvitation: { select: { email: true } },
           doctorProfile: {
             include: { user: true }
           }
@@ -34,7 +35,8 @@ export const startCronJobs = () => {
       });
 
       for (const appt of appointments) {
-        const patientEmail = appt.patient.email;
+        const patientEmail = appt.patient?.email || appt.patientInvitation?.email;
+        if (!patientEmail) continue;
         const doctorName = `${appt.doctorProfile.user.firstName} ${appt.doctorProfile.user.lastName}`;
         const dateStr = appt.date.toISOString().split('T')[0] || '';
 

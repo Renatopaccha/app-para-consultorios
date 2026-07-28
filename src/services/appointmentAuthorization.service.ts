@@ -2,7 +2,7 @@ import prisma from '../prisma';
 import { Role } from '../middlewares/auth.middleware';
 
 export interface AppointmentOwnership {
-  patientId: string;
+  patientId: string | null;
   doctorProfileId: string;
   clinicProfileId: string;
 }

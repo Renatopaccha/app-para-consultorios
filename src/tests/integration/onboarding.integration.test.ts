@@ -35,7 +35,7 @@ describe('onboarding profesional con PostgreSQL real', () => {
       .post('/api/admin/invitations').set(adminHeaders())
       .send({ email: 'medico.integration@zenda.test', role: 'DOCTOR' })
       .expect(201);
-    const rawToken: string = create.body.testToken;
+    const rawToken: string = create.body.developmentToken;
     expect(rawToken).toBeTruthy();
     expect(deliveredInvitations.at(-1)).toMatchObject({ to: 'medico.integration@zenda.test', token: rawToken });
 
@@ -72,7 +72,7 @@ describe('onboarding profesional con PostgreSQL real', () => {
     const clinic = await prisma.clinicProfile.create({ data: { userId: clinicAdmin.id, name: 'Clínica Test', address: 'Calle Test' } });
     const created = await request(app).post('/api/admin/invitations').set(adminHeaders())
       .send({ email: 'concurrente.integration@zenda.test', role: 'DOCTOR', clinicProfileId: clinic.id }).expect(201);
-    const payload = { token: created.body.testToken, firstName: 'Doc', lastName: 'Concurrente', password: 'integration-password-123', licenseNumber: 'CON-001', consultationPrice: 10 };
+    const payload = { token: created.body.developmentToken, firstName: 'Doc', lastName: 'Concurrente', password: 'integration-password-123', licenseNumber: 'CON-001', consultationPrice: 10 };
     const results = await Promise.allSettled([
       request(app).post('/api/auth/accept-invitation').send(payload),
       request(app).post('/api/auth/accept-invitation').send(payload),
@@ -89,14 +89,14 @@ describe('onboarding profesional con PostgreSQL real', () => {
     const revoked = await request(app).post('/api/admin/invitations').set(adminHeaders())
       .send({ email: 'revocada.integration@zenda.test', role: 'DOCTOR' }).expect(201);
     await request(app).post(`/api/admin/invitations/${revoked.body.invitation.id}/revoke`).set(adminHeaders()).expect(200);
-    await request(app).post('/api/auth/accept-invitation').send({ token: revoked.body.testToken, firstName: 'A', lastName: 'B', password: 'integration-password-123', licenseNumber: 'REV-001', consultationPrice: 1 }).expect(410);
+    await request(app).post('/api/auth/accept-invitation').send({ token: revoked.body.developmentToken, firstName: 'A', lastName: 'B', password: 'integration-password-123', licenseNumber: 'REV-001', consultationPrice: 1 }).expect(410);
 
     const resend = await request(app).post('/api/admin/invitations').set(adminHeaders())
       .send({ email: 'reenviada.integration@zenda.test', role: 'DOCTOR' }).expect(201);
     const replacement = await request(app).post(`/api/admin/invitations/${resend.body.invitation.id}/resend`).set(adminHeaders()).expect(200);
-    await request(app).post('/api/auth/accept-invitation').send({ token: resend.body.testToken, firstName: 'A', lastName: 'B', password: 'integration-password-123', licenseNumber: 'RES-OLD', consultationPrice: 1 }).expect(410);
+    await request(app).post('/api/auth/accept-invitation').send({ token: resend.body.developmentToken, firstName: 'A', lastName: 'B', password: 'integration-password-123', licenseNumber: 'RES-OLD', consultationPrice: 1 }).expect(410);
     await prisma.invitation.update({ where: { id: replacement.body.invitation.id }, data: { expiresAt: new Date(Date.now() - 1_000) } });
-    await request(app).post('/api/auth/accept-invitation').send({ token: replacement.body.testToken, firstName: 'A', lastName: 'B', password: 'integration-password-123', licenseNumber: 'RES-NEW', consultationPrice: 1 }).expect(410);
+    await request(app).post('/api/auth/accept-invitation').send({ token: replacement.body.developmentToken, firstName: 'A', lastName: 'B', password: 'integration-password-123', licenseNumber: 'RES-NEW', consultationPrice: 1 }).expect(410);
   });
 
   it('revierte la transacción si una restricción real impide crear el perfil médico', async () => {
@@ -104,7 +104,7 @@ describe('onboarding profesional con PostgreSQL real', () => {
     await prisma.doctorProfile.create({ data: { userId: existingUser.id, licenseNumber: 'DUP-001', consultationPrice: 1 } });
     const invite = await request(app).post('/api/admin/invitations').set(adminHeaders())
       .send({ email: 'fallo-perfil@zenda.test', role: 'DOCTOR' }).expect(201);
-    await request(app).post('/api/auth/accept-invitation').send({ token: invite.body.testToken, firstName: 'Fallo', lastName: 'Perfil', password: 'integration-password-123', licenseNumber: 'DUP-001', consultationPrice: 1 }).expect(500);
+    await request(app).post('/api/auth/accept-invitation').send({ token: invite.body.developmentToken, firstName: 'Fallo', lastName: 'Perfil', password: 'integration-password-123', licenseNumber: 'DUP-001', consultationPrice: 1 }).expect(500);
     expect(await prisma.user.count({ where: { email: 'fallo-perfil@zenda.test' } })).toBe(0);
     expect(await prisma.invitation.count({ where: { id: invite.body.invitation.id, acceptedAt: null } })).toBe(1);
   });
@@ -115,7 +115,7 @@ describe('onboarding profesional con PostgreSQL real', () => {
       await prisma.$executeRawUnsafe(`CREATE TRIGGER zenda_test_reject_clinic BEFORE INSERT ON "ClinicProfile" FOR EACH ROW EXECUTE FUNCTION zenda_test_reject_insert()`);
       const clinicInvite = await request(app).post('/api/admin/invitations').set(adminHeaders())
         .send({ email: 'fallo-clinica@zenda.test', role: 'CLINIC_ADMIN' }).expect(201);
-      await request(app).post('/api/auth/accept-invitation').send({ token: clinicInvite.body.testToken, firstName: 'Fallo', lastName: 'Clínica', password: 'integration-password-123', name: 'Clínica Fallida', address: 'Dirección' }).expect(500);
+      await request(app).post('/api/auth/accept-invitation').send({ token: clinicInvite.body.developmentToken, firstName: 'Fallo', lastName: 'Clínica', password: 'integration-password-123', name: 'Clínica Fallida', address: 'Dirección' }).expect(500);
       expect(await prisma.user.count({ where: { email: 'fallo-clinica@zenda.test' } })).toBe(0);
       expect(await prisma.invitation.count({ where: { id: clinicInvite.body.invitation.id, acceptedAt: null } })).toBe(1);
       await prisma.$executeRawUnsafe(`DROP TRIGGER zenda_test_reject_clinic ON "ClinicProfile"`);
@@ -125,7 +125,7 @@ describe('onboarding profesional con PostgreSQL real', () => {
       await prisma.$executeRawUnsafe(`CREATE TRIGGER zenda_test_reject_workplace BEFORE INSERT ON "DoctorClinicWorkplace" FOR EACH ROW EXECUTE FUNCTION zenda_test_reject_insert()`);
       const doctorInvite = await request(app).post('/api/admin/invitations').set(adminHeaders())
         .send({ email: 'fallo-workplace@zenda.test', role: 'DOCTOR', clinicProfileId: clinic.id }).expect(201);
-      await request(app).post('/api/auth/accept-invitation').send({ token: doctorInvite.body.testToken, firstName: 'Fallo', lastName: 'Workplace', password: 'integration-password-123', licenseNumber: 'WORK-001', consultationPrice: 1 }).expect(500);
+      await request(app).post('/api/auth/accept-invitation').send({ token: doctorInvite.body.developmentToken, firstName: 'Fallo', lastName: 'Workplace', password: 'integration-password-123', licenseNumber: 'WORK-001', consultationPrice: 1 }).expect(500);
       expect(await prisma.user.count({ where: { email: 'fallo-workplace@zenda.test' } })).toBe(0);
       expect(await prisma.invitation.count({ where: { id: doctorInvite.body.invitation.id, acceptedAt: null } })).toBe(1);
       await prisma.$executeRawUnsafe(`DROP TRIGGER zenda_test_reject_workplace ON "DoctorClinicWorkplace"`);

@@ -23,6 +23,7 @@ export async function clearIntegrationDatabase(): Promise<void> {
     prisma.appointmentTurn.deleteMany(),
     prisma.appointmentChangeLog.deleteMany(),
     prisma.appointment.deleteMany(),
+    prisma.patientInvitation.deleteMany(),
     prisma.workSchedule.deleteMany(),
     prisma.doctorClinicWorkplace.deleteMany(),
     prisma.certification.deleteMany(),

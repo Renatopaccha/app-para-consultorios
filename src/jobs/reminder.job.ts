@@ -34,6 +34,7 @@ cron.schedule('* * * * *', async () => {
       },
       include: {
         patient: true,
+        patientInvitation: { select: { email: true, firstName: true, lastName: true } },
         doctorProfile: {
           include: { user: true }
         },
@@ -42,6 +43,12 @@ cron.schedule('* * * * *', async () => {
     });
 
     for (const appointment of upcomingAppointments) {
+      const recipient = appointment.patient
+        ? { email: appointment.patient.email, firstName: appointment.patient.firstName, fcmToken: appointment.patient.fcmToken }
+        : appointment.patientInvitation
+          ? { email: appointment.patientInvitation.email, firstName: appointment.patientInvitation.firstName, fcmToken: null }
+          : null;
+      if (!recipient) continue;
       // Reconstruimos la fecha/hora exacta de la cita
       const parts = appointment.startTime.split(':');
       const hours = Number(parts[0]) || 0;
@@ -76,13 +83,13 @@ cron.schedule('* * * * *', async () => {
         
         const cancelHtml = `
           <h3>${cancelTitle}</h3>
-          <p>Hola ${appointment.patient.firstName},</p>
+          <p>Hola ${recipient.firstName},</p>
           <p>${cancelBody}</p>
         `;
         
-        notificationService.sendEmail(appointment.patient.email, cancelTitle, cancelHtml).catch(console.error);
-        if (appointment.patient.fcmToken) {
-          notificationService.sendPushNotification(appointment.patient.fcmToken, cancelTitle, cancelBody).catch(console.error);
+        notificationService.sendEmail(recipient.email, cancelTitle, cancelHtml).catch(console.error);
+        if (recipient.fcmToken) {
+          notificationService.sendPushNotification(recipient.fcmToken, cancelTitle, cancelBody).catch(console.error);
         }
 
         console.log(`[ReminderJob ${logTimestamp()}] Cita ${appointment.id} cancelada automáticamente por falta de confirmación (<= 12h).`);
@@ -92,19 +99,19 @@ cron.schedule('* * * * *', async () => {
       // Ventana de tolerancia: ~3 minutos (para evitar omitir por micro-retrasos en cron, pero asegurando no mandar doble)
       if (!appointment.reminder24hSent && hoursUntilAppointment <= 24.05 && hoursUntilAppointment >= 23.95) {
         reminderTitle = 'Recordatorio de Cita Médica 🩺';
-        reminderBody = `Hola ${appointment.patient.firstName}, recuerda tu cita con el Dr. ${appointment.doctorProfile.user?.lastName} a las ${appointment.startTime}. Turno #${appointment.turnNumber}.${pinText} ¡Te esperamos en ${appointment.clinicProfile.name}!`;
+        reminderBody = `Hola ${recipient.firstName}, recuerda tu cita con el Dr. ${appointment.doctorProfile.user?.lastName} a las ${appointment.startTime}. Turno #${appointment.turnNumber}.${pinText} ¡Te esperamos en ${appointment.clinicProfile.name}!`;
         updates.reminder24hSent = true;
         shouldUpdate = true;
       } 
       else if (!appointment.reminder2hSent && hoursUntilAppointment <= 2.05 && hoursUntilAppointment >= 1.95) {
         reminderTitle = 'Tu cita es en 2 horas ⏰';
-        reminderBody = `Hola ${appointment.patient.firstName}, recuerda tu cita con el Dr. ${appointment.doctorProfile.user?.lastName} a las ${appointment.startTime}. Turno #${appointment.turnNumber}.${pinText} ¡Llega con anticipación!`;
+        reminderBody = `Hola ${recipient.firstName}, recuerda tu cita con el Dr. ${appointment.doctorProfile.user?.lastName} a las ${appointment.startTime}. Turno #${appointment.turnNumber}.${pinText} ¡Llega con anticipación!`;
         updates.reminder2hSent = true;
         shouldUpdate = true;
       } 
       else if (!appointment.reminder1hSent && hoursUntilAppointment <= 1.05 && hoursUntilAppointment >= 0.95) {
         reminderTitle = '¡Tu cita es en 1 hora! ⏳';
-        reminderBody = `Hola ${appointment.patient.firstName}, prepárate. Tu cita (Turno #${appointment.turnNumber}) con el Dr. ${appointment.doctorProfile.user?.lastName} es a las ${appointment.startTime}. ¡Te esperamos!`;
+        reminderBody = `Hola ${recipient.firstName}, prepárate. Tu cita (Turno #${appointment.turnNumber}) con el Dr. ${appointment.doctorProfile.user?.lastName} es a las ${appointment.startTime}. ¡Te esperamos!`;
         updates.reminder1hSent = true;
         shouldUpdate = true;
       }
@@ -113,16 +120,16 @@ cron.schedule('* * * * *', async () => {
         // Enviar Email al paciente
         const emailHtml = `
           <h3>${reminderTitle}</h3>
-          <p>Hola ${appointment.patient.firstName},</p>
+          <p>Hola ${recipient.firstName},</p>
           <p>${reminderBody}</p>
           <p>Te esperamos.</p>
         `;
         // Fire and forget - si falla no bloquea la bd (idealmente usaríamos una queue, pero esto sirve para la Fase 2)
-        notificationService.sendEmail(appointment.patient.email, 'Recordatorio de Cita - Vitali', emailHtml).catch(console.error);
+        notificationService.sendEmail(recipient.email, 'Recordatorio de Cita - Zenda', emailHtml).catch(console.error);
 
         // Enviar Push (si tiene token guardado en la app móvil)
-        if (appointment.patient.fcmToken) {
-          notificationService.sendPushNotification(appointment.patient.fcmToken, reminderTitle, reminderBody).catch(console.error);
+        if (recipient.fcmToken) {
+          notificationService.sendPushNotification(recipient.fcmToken, reminderTitle, reminderBody).catch(console.error);
         }
 
         // Marcar la cita para no volver a enviar este recordatorio exacto

@@ -10,6 +10,7 @@ import { generateToken } from '../utils/jwt';
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const invitationRoles = ['DOCTOR', 'CLINIC_ADMIN'] as const;
 type InvitationRole = (typeof invitationRoles)[number];
+export const canExposeInvitationToken = (environment = process.env.NODE_ENV): boolean => environment === 'development' || environment === 'test';
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 const isEmail = (email: string) => /^\S+@\S+\.\S+$/.test(email);
@@ -81,13 +82,13 @@ export const createInvitation = async (req: AuthRequest, res: Response) => {
       await sendInvitation(email, role as InvitationRole, token, expiresAt);
     } catch (error) {
       console.error('[InvitationController] Invitation created but email delivery failed:', error instanceof Error ? error.message : error);
-      return res.status(202).json({ invitation, delivery: 'pending' });
+      return res.status(202).json({ invitation, delivery: 'pending', ...(canExposeInvitationToken() ? { developmentToken: token } : {}) });
     }
 
     return res.status(201).json({
       invitation,
       delivery: 'sent',
-      ...(process.env.NODE_ENV === 'test' ? { testToken: token } : {}),
+      ...(canExposeInvitationToken() ? { developmentToken: token } : {}),
     });
   } catch (error) {
     console.error('[InvitationController] Error creating invitation:', error instanceof Error ? error.message : error);
@@ -140,9 +141,9 @@ export const resendInvitation = async (req: AuthRequest, res: Response) => {
     await sendInvitation(replacement.email, replacement.role as InvitationRole, token, expiresAt);
   } catch (error) {
     console.error('[InvitationController] Invitation regenerated but email delivery failed:', error instanceof Error ? error.message : error);
-    return res.status(202).json({ invitation: replacement, delivery: 'pending' });
+    return res.status(202).json({ invitation: replacement, delivery: 'pending', ...(canExposeInvitationToken() ? { developmentToken: token } : {}) });
   }
-  return res.status(200).json({ invitation: replacement, delivery: 'sent', ...(process.env.NODE_ENV === 'test' ? { testToken: token } : {}) });
+  return res.status(200).json({ invitation: replacement, delivery: 'sent', ...(canExposeInvitationToken() ? { developmentToken: token } : {}) });
 };
 
 export const validateInvitation = async (req: Request, res: Response) => {
@@ -181,7 +182,7 @@ export const acceptInvitation = async (req: Request, res: Response) => {
       if (claimed.count !== 1) throw new Error('INVITATION_UNAVAILABLE');
       const existing = await tx.user.findUnique({ where: { email: invitation.email }, select: { id: true } });
       if (existing) throw new Error('EMAIL_CONFLICT');
-      const user = await tx.user.create({ data: { email: invitation.email, firstName: firstName.trim(), lastName: lastName.trim(), passwordHash, role: invitation.role } });
+      const user = await tx.user.create({ data: { email: invitation.email, emailNormalized: normalizeEmail(invitation.email), emailVerifiedAt: new Date(), firstName: firstName.trim(), lastName: lastName.trim(), passwordHash, role: invitation.role } });
       if (invitation.role === 'DOCTOR') {
         const doctor = await tx.doctorProfile.create({
           data: { userId: user.id, licenseNumber: (licenseNumber as string).trim(), consultationPrice: consultationPrice as number, verificationStatus: 'PENDING', isVerified: false },

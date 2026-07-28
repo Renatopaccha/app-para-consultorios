@@ -100,6 +100,13 @@ enum PatientConfirmationStatus {
   EXPIRED
 }
 
+enum PatientInvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
 enum TurnStatus {
   WAITING
   CALLED
@@ -107,6 +114,11 @@ enum TurnStatus {
   IN_PROGRESS
   COMPLETED
   MISSED
+}
+
+enum ScheduleBlockType {
+  BLOCK
+  PERSONAL
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +130,9 @@ model User {
   firstName String
   lastName  String
   email     String  @unique
+  // All new writes populate this canonical form. It stays nullable only while
+  // pre-existing installations are backfilled by the migration.
+  emailNormalized String? @unique
   phone     String?
   role      Role    @default(PATIENT)
 
@@ -133,6 +148,9 @@ model User {
   twoFactorCode        String?
   twoFactorExpires     DateTime?
   is2FAEnabled         Boolean   @default(false)
+  emailVerifiedAt            DateTime?
+  emailVerificationTokenHash String?   @unique
+  emailVerificationExpires   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -147,6 +165,7 @@ model User {
   reviewsGiven                Review[]                     @relation("PatientReviews")
   securityLogs                SecurityLog[]
   invitationsCreated          Invitation[]                 @relation("InvitationsCreated")
+  patientInvitationsCreated   PatientInvitation[]          @relation("PatientInvitationsCreated")
   paymentsConfirmed           Payment[]                    @relation("PaymentConfirmedBy")
   paymentEvents               PaymentEvent[]               @relation("PaymentEventActor")
   paymentIdempotencyKeys      PaymentIdempotencyKey[]
@@ -212,6 +231,7 @@ model ClinicProfile {
   services          Service[]
   scheduleBlocks    ScheduleBlock[]
   invitations       Invitation[]            @relation("ClinicInvitations")
+  patientInvitations PatientInvitation[]
   confirmedPayments Payment[]               @relation("PaymentConfirmedClinic")
   paymentEvents     PaymentEvent[]          @relation("PaymentEventClinic")
 
@@ -264,6 +284,7 @@ model DoctorProfile {
   services       Service[]
   scheduleBlocks ScheduleBlock[]
   certifications Certification[]
+  patientInvitations PatientInvitation[]
 
   @@index([isVerified])
   @@index([subscriptionStatus])
@@ -351,7 +372,8 @@ model Insurance {
 
 model Appointment {
   id              String @id @default(uuid())
-  patientId       String
+  patientId       String?
+  patientInvitationId String?
   doctorProfileId String
   clinicProfileId String
   serviceId       String
@@ -373,6 +395,11 @@ model Appointment {
   status            AppointmentStatus @default(PENDING)
   appointmentType   AppointmentType   @default(IN_PERSON)
   notes             String?
+  // Immutable enough for agenda/reminders while the invited person has no account.
+  invitedPatientFirstName String?
+  invitedPatientLastName  String?
+  invitedPatientEmail     String?
+  invitedPatientPhone     String?
 
   // Pagos
   paymentMethod                  String        @default("NONE")
@@ -407,7 +434,8 @@ model Appointment {
   outlookEventId String?
 
   // Relaciones
-  patient       User                   @relation("PatientAppointments", fields: [patientId], references: [id])
+  patient       User?                  @relation("PatientAppointments", fields: [patientId], references: [id])
+  patientInvitation PatientInvitation? @relation(fields: [patientInvitationId], references: [id])
   doctorProfile DoctorProfile          @relation(fields: [doctorProfileId], references: [id])
   clinicProfile ClinicProfile          @relation(fields: [clinicProfileId], references: [id])
   service       Service                @relation(fields: [serviceId], references: [id])
@@ -417,12 +445,41 @@ model Appointment {
   cashPayment   Payment?
 
   @@index([patientId])
+  @@index([patientInvitationId])
   @@index([doctorProfileId])
   @@index([clinicProfileId])
   @@index([serviceId])
   @@index([date])
   @@index([status])
   @@index([startsAt])
+}
+
+model PatientInvitation {
+  id              String                  @id @default(uuid())
+  email           String
+  emailNormalized String
+  firstName       String
+  lastName        String
+  phone           String?
+  tokenHash       String                  @unique
+  status          PatientInvitationStatus @default(PENDING)
+  expiresAt       DateTime                @db.Timestamptz(3)
+  acceptedAt      DateTime?               @db.Timestamptz(3)
+  revokedAt       DateTime?               @db.Timestamptz(3)
+  invitedByUserId String
+  doctorProfileId String?
+  clinicProfileId String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  invitedBy    User           @relation("PatientInvitationsCreated", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  doctorProfile DoctorProfile? @relation(fields: [doctorProfileId], references: [id], onDelete: SetNull)
+  clinicProfile ClinicProfile? @relation(fields: [clinicProfileId], references: [id], onDelete: SetNull)
+  appointments Appointment[]
+
+  @@index([emailNormalized, status])
+  @@index([expiresAt])
+  @@index([doctorProfileId, clinicProfileId])
 }
 
 model Payment {
@@ -558,6 +615,7 @@ model ScheduleBlock {
   clinicProfileId String?
   startsAt        DateTime @db.Timestamptz(3)
   endsAt          DateTime @db.Timestamptz(3)
+  type            ScheduleBlockType @default(BLOCK)
   reason          String?
   createdByUserId String
   createdAt       DateTime @default(now())

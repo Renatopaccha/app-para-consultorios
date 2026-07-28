@@ -16,7 +16,9 @@ export const uploadDoctorPhoto = async (req: AuthRequest, res: Response) => {
     if (!doctorProfile) return res.status(404).json({ error: 'Perfil de doctor no encontrado' });
 
     // Subir a Cloudinary
-    const secureUrl = await imageService.uploadImage(req.file.buffer, `zenda/doctors/${doctorProfile.id}/profile`);
+    // A stable public id makes subsequent replacements overwrite the current
+    // profile asset instead of creating one new Cloudinary asset per upload.
+    const secureUrl = await imageService.uploadImage(req.file.buffer, `zenda/doctors/${doctorProfile.id}/profile`, 'avatar');
 
     // Actualizar Base de Datos
     const updatedProfile = await prisma.doctorProfile.update({

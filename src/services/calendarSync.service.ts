@@ -13,6 +13,7 @@ export const syncAppointmentToCalendar = async (appointmentId: string): Promise<
       where: { id: appointmentId },
       include: {
         patient: true,
+        patientInvitation: { select: { email: true, firstName: true, lastName: true, phone: true } },
         doctorProfile: true,
         clinicProfile: true,
         service: true
@@ -28,17 +29,18 @@ export const syncAppointmentToCalendar = async (appointmentId: string): Promise<
     const startDateTime = `${dateStr}T${appointment.startTime}:00-05:00`;
     const endDateTime = `${dateStr}T${appointment.endTime}:00-05:00`;
 
-    let eventTitle = `Cita Zenda - ${appointment.patient.firstName} ${appointment.patient.lastName}`;
+    const patient = appointment.patient || appointment.patientInvitation || { firstName: appointment.invitedPatientFirstName || 'Paciente', lastName: appointment.invitedPatientLastName || 'invitado', email: appointment.invitedPatientEmail || '', phone: appointment.invitedPatientPhone };
+    let eventTitle = `Cita Zenda - ${patient.firstName} ${patient.lastName}`;
     
     if (appointment.paymentStatus === 'PENDING_CASH') {
       if (appointment.patientConfirmationStatus === 'CONFIRMED') {
-        eventTitle = `Asistencia Confirmada (Falta Pago Efectivo) - ${appointment.patient.firstName} ${appointment.patient.lastName}`;
+        eventTitle = `Asistencia Confirmada (Falta Pago Efectivo) - ${patient.firstName} ${patient.lastName}`;
       } else {
-        eventTitle = `Reserva - Falta confirmar asistencia (Pago Pendiente) - ${appointment.patient.firstName} ${appointment.patient.lastName}`;
+        eventTitle = `Reserva - Falta confirmar asistencia (Pago Pendiente) - ${patient.firstName} ${patient.lastName}`;
       }
     }
 
-    const eventDescription = `Servicio: ${appointment.service.name}\nPaciente: ${appointment.patient.email}\nTeléfono: ${appointment.patient.phone || 'No registrado'}`;
+    const eventDescription = `Servicio: ${appointment.service.name}\nPaciente: ${patient.email}\nTeléfono: ${patient.phone || 'No registrado'}`;
 
     const doc = appointment.doctorProfile;
     const clinic = appointment.clinicProfile;
@@ -102,6 +104,7 @@ export const updateCalendarEventStatus = async (appointmentId: string): Promise<
       where: { id: appointmentId },
       include: {
         patient: true,
+        patientInvitation: { select: { firstName: true, lastName: true } },
         doctorProfile: true,
         clinicProfile: true
       }
@@ -109,13 +112,14 @@ export const updateCalendarEventStatus = async (appointmentId: string): Promise<
 
     if (!appointment) throw new Error('Cita no encontrada');
 
-    let newTitle = `Cita Zenda - ${appointment.patient.firstName} ${appointment.patient.lastName}`;
+    const patient = appointment.patient || appointment.patientInvitation || { firstName: appointment.invitedPatientFirstName || 'Paciente', lastName: appointment.invitedPatientLastName || 'invitado' };
+    let newTitle = `Cita Zenda - ${patient.firstName} ${patient.lastName}`;
     
     if (appointment.paymentStatus === 'PENDING_CASH') {
       if (appointment.patientConfirmationStatus === 'CONFIRMED') {
-        newTitle = `Asistencia Confirmada (Falta Pago Efectivo) - ${appointment.patient.firstName} ${appointment.patient.lastName}`;
+        newTitle = `Asistencia Confirmada (Falta Pago Efectivo) - ${patient.firstName} ${patient.lastName}`;
       } else {
-        newTitle = `Reserva - Falta confirmar asistencia (Pago Pendiente) - ${appointment.patient.firstName} ${appointment.patient.lastName}`;
+        newTitle = `Reserva - Falta confirmar asistencia (Pago Pendiente) - ${patient.firstName} ${patient.lastName}`;
       }
     }
     const doc = appointment.doctorProfile;

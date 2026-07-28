@@ -3,7 +3,7 @@ import { Request, Response } from 'express';
 jest.mock('./prisma', () => ({
   __esModule: true,
   default: {
-    user: { findUnique: jest.fn(), update: jest.fn() },
+    user: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
     doctorProfile: { findUnique: jest.fn(), findMany: jest.fn() },
     clinicProfile: { findUnique: jest.fn() },
     assistantProfile: { findUnique: jest.fn() },
@@ -12,7 +12,7 @@ jest.mock('./prisma', () => ({
 }));
 
 jest.mock('./services/email.service', () => ({
-  emailService: { sendWelcomeEmail: jest.fn(), sendPasswordReset: jest.fn() },
+  emailService: { sendWelcomeEmail: jest.fn(), sendEmailVerificationEmail: jest.fn(), sendPasswordReset: jest.fn() },
 }));
 
 import prisma from './prisma';
@@ -34,7 +34,7 @@ const response = (): MockResponse => {
 };
 
 const prismaMock = prisma as unknown as {
-  user: { findUnique: jest.Mock; update: jest.Mock };
+  user: { findUnique: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
   doctorProfile: { findUnique: jest.Mock; findMany: jest.Mock };
   clinicProfile: { findUnique: jest.Mock };
   assistantProfile: { findUnique: jest.Mock };
@@ -45,6 +45,7 @@ beforeEach(() => {
   process.env.JWT_SECRET = 'a'.repeat(32);
   jest.clearAllMocks();
   jest.mocked(emailService.sendWelcomeEmail).mockResolvedValue(undefined);
+  jest.mocked(emailService.sendEmailVerificationEmail).mockResolvedValue(undefined);
   jest.mocked(emailService.sendPasswordReset).mockResolvedValue(undefined);
 });
 
@@ -54,7 +55,7 @@ describe('P0 security controls', () => {
     async (role) => {
       const createdUser = { id: 'patient-1', email: 'patient@example.test', firstName: 'Pat', lastName: 'Ient', phone: null, role: 'PATIENT' };
       const create = jest.fn().mockResolvedValue(createdUser);
-      prismaMock.user.findUnique.mockResolvedValue(null);
+      prismaMock.user.findFirst.mockResolvedValue(null);
       prismaMock.$transaction.mockImplementation(async (callback: (tx: { user: { create: jest.Mock } }) => Promise<unknown>) => callback({ user: { create } }));
       const res = response();
 

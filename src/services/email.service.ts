@@ -19,10 +19,16 @@ export type InvitationEmail = { to: string; role: string; token: string; expires
 export type InvitationEmailAdapter = (email: InvitationEmail) => Promise<void>;
 export type CashPaymentCodeEmail = { to: string; code: string; doctorName: string; clinicName: string; serviceName: string; startsAt: Date; amountCents: number; currency: string };
 export type CashPaymentCodeEmailAdapter = (email: CashPaymentCodeEmail) => Promise<void>;
+export type PatientInvitationEmail = { to: string; firstName: string; token: string; expiresAt: Date };
+export type PatientInvitationEmailAdapter = (email: PatientInvitationEmail) => Promise<void>;
+export type EmailVerification = { to: string; firstName: string; token: string };
+export type EmailVerificationAdapter = (email: EmailVerification) => Promise<void>;
 
 // Integration tests use this in-memory adapter; production always calls Resend.
 let invitationEmailAdapter: InvitationEmailAdapter | undefined;
 let cashPaymentCodeEmailAdapter: CashPaymentCodeEmailAdapter | undefined;
+let patientInvitationEmailAdapter: PatientInvitationEmailAdapter | undefined;
+let emailVerificationAdapter: EmailVerificationAdapter | undefined;
 
 export function setInvitationEmailAdapterForTests(adapter: InvitationEmailAdapter | undefined): void {
   if (process.env.NODE_ENV !== 'test') {
@@ -35,8 +41,30 @@ export function setCashPaymentCodeEmailAdapterForTests(adapter: CashPaymentCodeE
   if (process.env.NODE_ENV !== 'test') throw new Error('El adaptador de correo de pruebas solo está disponible en NODE_ENV=test.');
   cashPaymentCodeEmailAdapter = adapter;
 }
+export function setPatientInvitationEmailAdapterForTests(adapter: PatientInvitationEmailAdapter | undefined): void {
+  if (process.env.NODE_ENV !== 'test') throw new Error('El adaptador de correo de pruebas solo está disponible en NODE_ENV=test.');
+  patientInvitationEmailAdapter = adapter;
+}
+export function setEmailVerificationAdapterForTests(adapter: EmailVerificationAdapter | undefined): void {
+  if (process.env.NODE_ENV !== 'test') throw new Error('El adaptador de correo de pruebas solo está disponible en NODE_ENV=test.');
+  emailVerificationAdapter = adapter;
+}
 
 export const emailService = {
+
+  async sendPatientInvitationEmail(email: PatientInvitationEmail) {
+    if (patientInvitationEmailAdapter) return patientInvitationEmailAdapter(email);
+    if (process.env.NODE_ENV === 'test') return;
+    const url = `${process.env.PATIENT_INVITATION_REGISTER_URL || 'http://localhost:5173/register'}?invitation=${encodeURIComponent(email.token)}`;
+    await resend.emails.send({ from: FROM_EMAIL, to: email.to, subject: 'Tienes una cita en Zenda', html: `<p>Hola ${email.firstName},</p><p>Un profesional de salud registró una cita para ti en Zenda.</p><p><a href="${url}">Crea tu cuenta y verifica tu correo para ver y gestionar la cita</a>.</p><p>El enlace vence el ${email.expiresAt.toLocaleString('es-EC')}.</p>` });
+  },
+
+  async sendEmailVerificationEmail(email: EmailVerification) {
+    if (emailVerificationAdapter) return emailVerificationAdapter(email);
+    if (process.env.NODE_ENV === 'test') return;
+    const url = `${process.env.EMAIL_VERIFICATION_URL || 'http://localhost:5173/verify-email'}?token=${encodeURIComponent(email.token)}`;
+    await resend.emails.send({ from: FROM_EMAIL, to: email.to, subject: 'Verifica tu correo de Zenda', html: `<p>Hola ${email.firstName},</p><p><a href="${url}">Verificar correo</a></p>` });
+  },
 
   async sendCashPaymentCodeEmail(email: CashPaymentCodeEmail) {
     if (cashPaymentCodeEmailAdapter) return cashPaymentCodeEmailAdapter(email);
@@ -71,6 +99,7 @@ export const emailService = {
    * Incluye la clínica y banners promocionales de Zenda.
    */
   async sendDoctorAppointmentConfirmation({ to, patientName, date, time, doctorName, clinicName }: { to: string, patientName: string, date: string, time: string, doctorName: string, clinicName: string }) {
+    if (process.env.NODE_ENV === 'test') return;
     try {
       const htmlContent = `
       <!DOCTYPE html>
@@ -263,6 +292,7 @@ export const emailService = {
    * Envía un correo de bienvenida a los nuevos usuarios.
    */
   async sendWelcomeEmail(to: string, name: string, role: string) {
+    if (process.env.NODE_ENV === 'test') return;
     try {
       // Traducimos el rol, si no existe en el diccionario, ponemos 'usuario' por defecto
       const friendlyRole = roleTranslations[role] || 'usuario';

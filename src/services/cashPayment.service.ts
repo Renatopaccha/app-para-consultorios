@@ -27,7 +27,7 @@ function cashPaymentResponse(payment: PaymentDetails) {
     paymentId: payment.id,
     method: payment.method,
     status: payment.status,
-    patient: { id: appointment.patient.id, displayName: `${appointment.patient.firstName} ${appointment.patient.lastName}`.trim() },
+    patient: appointment.patient ? { id: appointment.patient.id, displayName: `${appointment.patient.firstName} ${appointment.patient.lastName}`.trim() } : { id: null, displayName: `${appointment.invitedPatientFirstName || ''} ${appointment.invitedPatientLastName || ''}`.trim() || 'Paciente invitado' },
     doctor: { id: appointment.doctorProfile.id, displayName: `${appointment.doctorProfile.user.firstName} ${appointment.doctorProfile.user.lastName}`.trim() },
     clinic: { id: appointment.clinicProfile.id, name: appointment.clinicProfile.name },
     appointment: { id: appointment.id, startsAt: appointment.startsAt?.toISOString() || null, serviceName: appointment.serviceNameSnapshot || appointment.service.name },
@@ -147,6 +147,7 @@ export async function reissueCashPaymentCode(paymentId: string, actor: PaymentAc
     const code = generateCashPaymentCode();
     const updated = await tx.payment.update({ where: { id: payment.id }, data: { verificationCodeHash: hashCashPaymentCode(code), verificationCodeLast4: cashCodeLast4(code), codeExpiresAt: cashPaymentCodeExpiresAt(payment.appointment.endsAt), failedVerificationAttempts: 0, lockedUntil: null } });
     await tx.paymentEvent.create({ data: { paymentId, eventType: 'CODE_REISSUED', actorUserId: actor.id, clinicId: actor.role === 'PATIENT' ? null : payment.appointment.clinicProfileId, metadata: { reason: actor.role === 'PATIENT' ? 'PATIENT_REQUEST' : reason!.trim() } } });
+    if (!payment.appointment.patient) throw new BookingError('PATIENT_ACCOUNT_REQUIRED', 422, 'El paciente debe crear su cuenta antes de gestionar pagos.');
     return { code, payment: { ...payment, ...updated }, email: { to: payment.appointment.patient.email, doctorName: `${payment.appointment.doctorProfile.user.firstName} ${payment.appointment.doctorProfile.user.lastName}`.trim(), clinicName: payment.appointment.clinicProfile.name, serviceName: payment.appointment.serviceNameSnapshot || payment.appointment.service.name, startsAt: payment.appointment.startsAt!, amountCents: payment.amountCents, currency: payment.currency } };
   });
   await emailService.sendCashPaymentCodeEmail({ ...result.email, code: result.code }).catch(() => undefined);

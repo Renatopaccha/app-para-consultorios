@@ -10,7 +10,10 @@ export function parseRequestedStart(value: unknown): Date {
 }
 export function localDateTimeToUtc(date: string, time: string): Date { return parseRequestedStart(`${date}T${time}`); }
 export function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) { return aStart < bEnd && aEnd > bStart; }
-export function localWeekday(date: Date): number { return (Number(new Intl.DateTimeFormat('en-US', { timeZone: APP_TIMEZONE, weekday: 'short' }).format(date).replace(/\D/g, '')) || ((date.getUTCDay() + 6) % 7)); }
+export function localWeekday(date: Date): number {
+  const local = localDate(date);
+  return (new Date(`${local}T00:00:00.000Z`).getUTCDay() + 6) % 7;
+}
 export function localDate(date: Date): string { return new Intl.DateTimeFormat('en-CA', { timeZone: APP_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date); }
 export function localTime(date: Date): string { return new Intl.DateTimeFormat('en-GB', { timeZone: APP_TIMEZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date); }
 export function minutes(time: string) { const [h = 0, m = 0] = time.split(':').map(Number); return h * 60 + m; }

@@ -51,6 +51,20 @@ describe('invitation HTTP boundary', () => {
     expect(response.status).toBe(201);
     expect(response.body.invitation.email).toBe('doctor@example.test');
     expect(response.body.invitation.tokenHash).toBeUndefined();
+    expect(response.body.developmentToken).toBeTruthy();
     expect(prismaMock.invitation.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ email: 'doctor@example.test', tokenHash: expect.any(String) }) }));
+  });
+
+  it('never exposes an invitation token in production responses', async () => {
+    const originalEnvironment = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    prismaMock.user.findUnique.mockResolvedValue(null);
+    prismaMock.invitation.findFirst.mockResolvedValue(null);
+    prismaMock.invitation.create.mockResolvedValue({ id: 'invite-production', email: 'doctor@example.test', role: 'DOCTOR', clinicProfileId: null, expiresAt: new Date(), createdAt: new Date() });
+    const token = generateToken({ id: 'admin-1', role: 'SUPER_ADMIN' });
+    const response = await request(app).post('/api/admin/invitations').set('Authorization', `Bearer ${token}`).send({ email: 'doctor@example.test', role: 'DOCTOR' });
+    expect(response.status).toBe(201);
+    expect(response.body.developmentToken).toBeUndefined();
+    process.env.NODE_ENV = originalEnvironment;
   });
 });

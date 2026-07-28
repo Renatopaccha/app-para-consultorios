@@ -231,14 +231,28 @@ export const getAppointments = async (req: AuthRequest, res: Response) => {
 
     const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
     if (!doctor) return res.status(403).json({ error: 'Acceso exclusivo para doctores' });
+    const clinicId = typeof req.query.clinicId === 'string' && req.query.clinicId.trim() ? req.query.clinicId.trim() : null;
+    const rangeStartValue = typeof req.query.rangeStart === 'string' ? req.query.rangeStart : null;
+    const rangeEndValue = typeof req.query.rangeEnd === 'string' ? req.query.rangeEnd : null;
+    const rangeStart = rangeStartValue ? new Date(rangeStartValue) : null;
+    const rangeEnd = rangeEndValue ? new Date(rangeEndValue) : null;
+    if ((rangeStart && Number.isNaN(rangeStart.getTime())) || (rangeEnd && Number.isNaN(rangeEnd.getTime()))
+      || (!!rangeStart !== !!rangeEnd) || (rangeStart && rangeEnd && rangeEnd <= rangeStart)) {
+      return res.status(400).json({ error: 'INVALID_RANGE', message: 'El rango de fechas no es válido.' });
+    }
 
     const appointments = await prisma.appointment.findMany({
-      where: { doctorProfileId: doctor.id },
+      where: {
+        doctorProfileId: doctor.id,
+        ...(clinicId ? { clinicProfileId: clinicId } : {}),
+        ...(rangeStart && rangeEnd ? { startsAt: { lt: rangeEnd }, endsAt: { gt: rangeStart } } : {}),
+      },
       include: {
         patient: { select: { id: true, firstName: true, lastName: true } },
         turn: true,
         cashPayment: { select: { status: true } }
-      }
+      },
+      orderBy: { startsAt: 'asc' },
     });
 
     const formattedAppointments = appointments.map(app => {
@@ -248,7 +262,7 @@ export const getAppointments = async (req: AuthRequest, res: Response) => {
 
       return {
         ...app,
-        patientId: app.patient.id,
+        patientId: app.patient?.id ?? null,
         startDatetime: formattedDate,
         appointmentStatus: app.status,
         ...getAppointmentCalendarPresentation({ ...app, turnStatus: app.turn?.status }),

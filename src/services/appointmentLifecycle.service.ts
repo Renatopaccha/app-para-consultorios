@@ -4,7 +4,7 @@ import { BookingError } from './appointmentBooking.service';
 import { localDate } from '../utils/scheduling';
 
 type Actor = { id: string; role: Role };
-async function canManage(appointment: { patientId: string; doctorProfileId: string; clinicProfileId: string }, actor: Actor, patientAllowed: boolean) {
+async function canManage(appointment: { patientId: string | null; doctorProfileId: string; clinicProfileId: string }, actor: Actor, patientAllowed: boolean) {
   if (actor.role === 'SUPER_ADMIN') return true;
   if (actor.role === 'PATIENT') return patientAllowed && appointment.patientId === actor.id;
   if (actor.role === 'DOCTOR') return (await prisma.doctorProfile.findUnique({ where: { id: appointment.doctorProfileId } }))?.userId === actor.id;
