@@ -6,13 +6,13 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 import { canManageClinic } from '../services/appointmentAuthorization.service';
 import { emailService } from '../services/email.service';
 import { generateToken } from '../utils/jwt';
+import { normalizeEmail } from '../services/emailIdentity.service';
 
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const invitationRoles = ['DOCTOR', 'CLINIC_ADMIN'] as const;
 type InvitationRole = (typeof invitationRoles)[number];
 export const canExposeInvitationToken = (environment = process.env.NODE_ENV): boolean => environment === 'development' || environment === 'test';
 
-const normalizeEmail = (email: string) => email.trim().toLowerCase();
 const isEmail = (email: string) => /^\S+@\S+\.\S+$/.test(email);
 const hashInvitationToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 const maskEmail = (email: string) => {
@@ -65,7 +65,7 @@ export const createInvitation = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'No tienes permisos para crear invitaciones.' });
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    const existingUser = await prisma.user.findUnique({ where: { emailNormalized: email }, select: { id: true } });
     if (existingUser) return res.status(409).json({ error: 'Ya existe una cuenta con este correo.' });
     if (await hasActiveInvitation(email, role as InvitationRole, clinicProfileId)) {
       return res.status(409).json({ error: 'Ya existe una invitación activa equivalente.' });
@@ -180,7 +180,7 @@ export const acceptInvitation = async (req: Request, res: Response) => {
         data: { acceptedAt: new Date() },
       });
       if (claimed.count !== 1) throw new Error('INVITATION_UNAVAILABLE');
-      const existing = await tx.user.findUnique({ where: { email: invitation.email }, select: { id: true } });
+      const existing = await tx.user.findUnique({ where: { emailNormalized: normalizeEmail(invitation.email) }, select: { id: true } });
       if (existing) throw new Error('EMAIL_CONFLICT');
       const user = await tx.user.create({ data: { email: invitation.email, emailNormalized: normalizeEmail(invitation.email), emailVerifiedAt: new Date(), firstName: firstName.trim(), lastName: lastName.trim(), passwordHash, role: invitation.role } });
       if (invitation.role === 'DOCTOR') {

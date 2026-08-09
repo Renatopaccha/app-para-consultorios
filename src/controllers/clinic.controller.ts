@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
 import { canManageClinic } from '../services/appointmentAuthorization.service';
+import { normalizeEmail } from '../services/emailIdentity.service';
 
 export const getClinics = async (req: Request, res: Response) => {
   try {
@@ -80,7 +81,7 @@ export const addDoctorToClinic = async (req: AuthRequest, res: Response) => {
 
     // 1. Buscar al User por email y verificar que tenga DoctorProfile
     const userDoctor = await prisma.user.findUnique({
-      where: { email },
+      where: { emailNormalized: normalizeEmail(email) },
       include: { doctorProfile: true }
     });
 

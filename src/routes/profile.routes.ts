@@ -14,7 +14,7 @@ const storage = multer.memoryStorage();
 const upload = multer({
   storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // Límite de 5MB
+    fileSize: 10 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
     // 1. Corrección: Seguridad (File Filter)
@@ -31,7 +31,7 @@ const upload = multer({
 const handleUploadError = (err: any, req: any, res: any, next: any) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ error: 'El archivo excede el límite de 5MB' });
+      return res.status(413).json({ error: 'IMAGE_TOO_LARGE', message: 'El archivo excede el límite de 10 MB.' });
     }
     return res.status(400).json({ error: `Error de carga: ${err.message}` });
   } else if (err) {

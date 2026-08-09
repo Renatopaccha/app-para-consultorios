@@ -1,22 +1,32 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
+import { listMyDoctorReviews, listPublicDoctorReviews, parseDoctorReviewFilters, ReviewDomainError } from '../services/review.service';
+
+function fail(res: Response, status: number, error: string, message: string) {
+  return res.status(status).json({ error, message });
+}
 
 export const createReview = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'No autorizado' });
 
-    const { appointmentId, rating, comment } = req.body;
+    const { appointmentId, rating, comment } = req.body as { appointmentId?: unknown; rating?: unknown; comment?: unknown };
 
     if (!appointmentId || rating === undefined) {
-      return res.status(400).json({ error: 'Faltan campos requeridos (appointmentId, rating)' });
+      return fail(res, 422, 'INVALID_REVIEW', 'Faltan campos requeridos (appointmentId, rating).');
     }
 
     const parsedRating = parseInt(String(rating));
     if (isNaN(parsedRating) || parsedRating < 1 || parsedRating > 5) {
-      return res.status(400).json({ error: 'El rating debe ser un número entre 1 y 5' });
+      return fail(res, 422, 'INVALID_REVIEW_RATING', 'El rating debe ser un número entero entre 1 y 5.');
     }
+
+    if (String(parsedRating) !== String(rating)) return fail(res, 422, 'INVALID_REVIEW_RATING', 'El rating debe ser un número entero entre 1 y 5.');
+    if (comment !== undefined && comment !== null && typeof comment !== 'string') return fail(res, 422, 'INVALID_REVIEW_COMMENT', 'El comentario debe ser texto.');
+    const normalizedComment = typeof comment === 'string' ? comment.trim() : '';
+    if (normalizedComment.length > 2000) return fail(res, 422, 'INVALID_REVIEW_COMMENT', 'El comentario no puede exceder 2000 caracteres.');
 
     // Buscar la cita
     const appointment = await prisma.appointment.findUnique({
@@ -24,17 +34,17 @@ export const createReview = async (req: AuthRequest, res: Response) => {
     });
 
     if (!appointment) {
-      return res.status(404).json({ error: 'Cita no encontrada' });
+      return fail(res, 404, 'APPOINTMENT_NOT_FOUND', 'Cita no encontrada.');
     }
 
     // Validación 1: Seguridad
     if (appointment.patientId !== userId) {
-      return res.status(403).json({ error: 'Solo el paciente dueño de la cita puede opinar' });
+      return fail(res, 403, 'APPOINTMENT_NOT_OWNED', 'Solo el paciente dueño de la cita puede opinar.');
     }
 
     // Validación 2: Regla de Negocio
     if (appointment.status !== 'COMPLETED') {
-      return res.status(400).json({ error: 'Solo puedes calificar una cita finalizada' });
+      return fail(res, 400, 'APPOINTMENT_NOT_COMPLETED', 'Solo puedes calificar una cita finalizada.');
     }
 
     // Validación 3: Prevención de Spam
@@ -43,7 +53,7 @@ export const createReview = async (req: AuthRequest, res: Response) => {
     });
 
     if (existingReview) {
-      return res.status(409).json({ error: 'Ya existe una reseña para esta cita' });
+      return fail(res, 409, 'REVIEW_ALREADY_EXISTS', 'Ya existe una reseña para esta cita.');
     }
 
     // Crear la reseña
@@ -53,12 +63,18 @@ export const createReview = async (req: AuthRequest, res: Response) => {
         patientId: userId,
         doctorProfileId: appointment.doctorProfileId,
         rating: parsedRating,
-        comment: comment ? String(comment) : null
+        comment: normalizedComment || null
       }
     });
 
-    return res.status(201).json({ message: 'Reseña guardada exitosamente', review });
+    return res.status(201).json({
+      message: 'Reseña guardada exitosamente',
+      review: { id: review.id, rating: review.rating, comment: review.comment, createdAt: review.createdAt.toISOString() },
+    });
   } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') {
+      return fail(res, 409, 'REVIEW_ALREADY_EXISTS', 'Ya existe una reseña para esta cita.');
+    }
     console.error('[Review Controller] Error en createReview:', error);
     return res.status(500).json({ error: 'Error al crear la reseña' });
   }
@@ -71,36 +87,21 @@ export const getDoctorReviews = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'El doctorId es requerido' });
     }
 
-    // Obtener las reseñas del doctor
-    const reviews = await prisma.review.findMany({
-      where: { doctorProfileId: String(doctorId) },
-      include: {
-        patient: {
-          select: { firstName: true }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    // Calcular promedios usando prisma.aggregate
-    const aggregation = await prisma.review.aggregate({
-      where: { doctorProfileId: String(doctorId) },
-      _avg: { rating: true },
-      _count: { id: true }
-    });
-
-    const averageRating = aggregation._avg.rating || 0;
-    const totalReviews = aggregation._count.id || 0;
-
-    return res.status(200).json({
-      summary: {
-        averageRating: Number(averageRating.toFixed(1)),
-        totalReviews
-      },
-      reviews
-    });
+    return res.status(200).json(await listPublicDoctorReviews(String(doctorId)));
   } catch (error) {
     console.error('[Review Controller] Error en getDoctorReviews:', error);
     return res.status(500).json({ error: 'Error al obtener las reseñas del médico' });
+  }
+};
+
+export const getMyDoctorReviews = async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) return fail(res, 401, 'UNAUTHORIZED', 'No autorizado.');
+    const filters = parseDoctorReviewFilters(req.query);
+    return res.status(200).json(await listMyDoctorReviews(req.user.id, filters));
+  } catch (error) {
+    if (error instanceof ReviewDomainError) return fail(res, error.status, error.code, error.message);
+    console.error('[Review Controller] Error en getMyDoctorReviews:', error instanceof Error ? error.message : error);
+    return fail(res, 500, 'REVIEW_LIST_FAILED', 'Error al obtener las reseñas del médico.');
   }
 };

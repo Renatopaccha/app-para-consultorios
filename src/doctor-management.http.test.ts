@@ -19,10 +19,13 @@ import app from './app';
 import prisma from './prisma';
 import { generateToken } from './utils/jwt';
 
-const prismaMock = prisma as unknown as { doctorProfile: { findUnique: jest.Mock }; specialty: { findMany: jest.Mock }; insurance: { findMany: jest.Mock } };
+const prismaMock = prisma as unknown as { user: { findUnique: jest.Mock }; doctorProfile: { findUnique: jest.Mock }; specialty: { findMany: jest.Mock }; insurance: { findMany: jest.Mock } };
 
 beforeEach(() => {
   jest.clearAllMocks();
+  prismaMock.user.findUnique.mockImplementation(({ where }: { where: { id?: string } }) => Promise.resolve(
+    where.id === 'patient-user' ? { id: 'patient-user', role: 'PATIENT' } : { id: 'doctor-user', role: 'DOCTOR' },
+  ));
   prismaMock.doctorProfile.findUnique.mockImplementation(({ where }: { where: { userId?: string } }) => Promise.resolve({
     id: 'doctor-profile', userId: 'doctor-user', licenseNumber: 'MED-1', bio: null, languages: [], profileImageUrl: null, specialties: [], insurances: [],
     user: { id: 'doctor-user', email: 'doctor@example.test', firstName: 'Ada', lastName: 'Doctor', phone: null },

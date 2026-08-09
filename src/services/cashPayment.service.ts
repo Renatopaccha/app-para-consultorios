@@ -3,8 +3,9 @@ import { CashPaymentStatus, Prisma } from '../../generated/prisma';
 import prisma from '../prisma';
 import { emailService } from './email.service';
 import { BookingError } from './appointmentBooking.service';
-import { PaymentActor, paymentAppointmentScope } from './cashPaymentAuthorization.service';
+import { assertPaymentFiltersWithinScope, PaymentActor, paymentAppointmentScope } from './cashPaymentAuthorization.service';
 import { cashAmountFromCents, cashCodeLast4, cashPaymentCodeExpiresAt, generateCashPaymentCode, hashCashPaymentCode, hashPaymentSecurityValue } from './cashPaymentCode.service';
+import { localDateTimeToUtc } from '../utils/scheduling';
 
 const detailsInclude = {
   appointment: {
@@ -175,13 +176,19 @@ export async function rescheduleCashPaymentForAppointment(tx: Prisma.Transaction
 }
 
 export async function listCashPayments(actor: PaymentActor, query: Record<string, string | undefined>, pendingOnly = true) {
+  await assertPaymentFiltersWithinScope(actor, query);
   const scope = await paymentAppointmentScope(actor);
   const where: Prisma.PaymentWhereInput = { method: 'CASH', ...(pendingOnly ? { status: 'PENDING' } : {}), appointment: { ...scope } };
   if (query.status && ['PENDING', 'CONFIRMED', 'CANCELLED', 'REFUNDED', 'EXEMPTED'].includes(query.status)) where.status = query.status as CashPaymentStatus;
   if (query.patient) where.appointment = { ...scope, patient: { OR: [{ firstName: { contains: query.patient, mode: 'insensitive' } }, { lastName: { contains: query.patient, mode: 'insensitive' } }] } };
-  if (query.doctorId) where.appointment = { ...scope, doctorProfileId: query.doctorId };
+  if (query.doctorId && actor.role !== 'DOCTOR') where.appointment = { ...scope, doctorProfileId: query.doctorId };
   if (query.clinicId) where.appointment = { ...scope, clinicProfileId: query.clinicId };
-  if (query.date) { const start = new Date(`${query.date}T00:00:00.000Z`); const end = new Date(start.getTime() + 86400_000); where.appointment = { ...scope, ...(where.appointment as Prisma.AppointmentWhereInput), startsAt: { gte: start, lt: end } }; }
+  if (query.date) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(query.date)) throw new BookingError('INVALID_DATE_FILTER', 422, 'La fecha no es válida.');
+    const start = localDateTimeToUtc(query.date, '00:00');
+    const end = new Date(start.getTime() + 86_400_000);
+    where.appointment = { ...scope, ...(where.appointment as Prisma.AppointmentWhereInput), startsAt: { gte: start, lt: end } };
+  }
   const payments = await prisma.payment.findMany({ where, include: detailsInclude, orderBy: { appointment: { startsAt: 'asc' } } });
   return payments.map(cashPaymentResponse);
 }

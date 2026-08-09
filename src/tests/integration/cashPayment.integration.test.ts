@@ -18,16 +18,16 @@ describe('pagos en efectivo auditables con PostgreSQL real', () => {
     assertIntegrationDatabase(); await clearIntegrationDatabase(); sentEmails = [];
     setCashPaymentCodeEmailAdapterForTests(async email => { sentEmails.push(email); });
     const users = await Promise.all([
-      prisma.user.create({ data: { email: 'cash-doctor@zenda.test', firstName: 'Ana', lastName: 'Médica', passwordHash: 'x', role: 'DOCTOR' } }),
-      prisma.user.create({ data: { email: 'cash-clinic@zenda.test', firstName: 'Clínica', lastName: 'Principal', passwordHash: 'x', role: 'CLINIC_ADMIN' } }),
-      prisma.user.create({ data: { email: 'cash-patient@zenda.test', firstName: 'Juan', lastName: 'Paciente', passwordHash: 'x', role: 'PATIENT' } }),
-      prisma.user.create({ data: { email: 'cash-assistant@zenda.test', firstName: 'Sara', lastName: 'Asistente', passwordHash: 'x', role: 'ASSISTANT' } }),
-      prisma.user.create({ data: { email: 'cash-other-doctor@zenda.test', firstName: 'Otro', lastName: 'Médico', passwordHash: 'x', role: 'DOCTOR' } }),
-      prisma.user.create({ data: { email: 'cash-other-clinic@zenda.test', firstName: 'Otra', lastName: 'Clínica', passwordHash: 'x', role: 'CLINIC_ADMIN' } }),
-      prisma.user.create({ data: { email: 'cash-other-assistant@zenda.test', firstName: 'Otra', lastName: 'Asistente', passwordHash: 'x', role: 'ASSISTANT' } }),
+      prisma.user.create({ data: { email: 'cash-doctor@zenda.test', emailNormalized: 'cash-doctor@zenda.test', firstName: 'Ana', lastName: 'Médica', passwordHash: 'x', role: 'DOCTOR' } }),
+      prisma.user.create({ data: { email: 'cash-clinic@zenda.test', emailNormalized: 'cash-clinic@zenda.test', firstName: 'Clínica', lastName: 'Principal', passwordHash: 'x', role: 'CLINIC_ADMIN' } }),
+      prisma.user.create({ data: { email: 'cash-patient@zenda.test', emailNormalized: 'cash-patient@zenda.test', firstName: 'Juan', lastName: 'Paciente', passwordHash: 'x', role: 'PATIENT' } }),
+      prisma.user.create({ data: { email: 'cash-assistant@zenda.test', emailNormalized: 'cash-assistant@zenda.test', firstName: 'Sara', lastName: 'Asistente', passwordHash: 'x', role: 'ASSISTANT' } }),
+      prisma.user.create({ data: { email: 'cash-other-doctor@zenda.test', emailNormalized: 'cash-other-doctor@zenda.test', firstName: 'Otro', lastName: 'Médico', passwordHash: 'x', role: 'DOCTOR' } }),
+      prisma.user.create({ data: { email: 'cash-other-clinic@zenda.test', emailNormalized: 'cash-other-clinic@zenda.test', firstName: 'Otra', lastName: 'Clínica', passwordHash: 'x', role: 'CLINIC_ADMIN' } }),
+      prisma.user.create({ data: { email: 'cash-other-assistant@zenda.test', emailNormalized: 'cash-other-assistant@zenda.test', firstName: 'Otra', lastName: 'Asistente', passwordHash: 'x', role: 'ASSISTANT' } }),
     ]);
     const [doctorUser, clinicUser, patient, assistantUser, otherDoctorUser, otherClinicUser, otherAssistantUser] = users;
-    const superAdmin = await prisma.user.create({ data: { email: 'cash-superadmin@zenda.test', firstName: 'Super', lastName: 'Admin', passwordHash: 'x', role: 'SUPER_ADMIN' } });
+    const superAdmin = await prisma.user.create({ data: { email: 'cash-superadmin@zenda.test', emailNormalized: 'cash-superadmin@zenda.test', firstName: 'Super', lastName: 'Admin', passwordHash: 'x', role: 'SUPER_ADMIN' } });
     const doctor = await prisma.doctorProfile.create({ data: { userId: doctorUser.id, licenseNumber: 'CASH-001', consultationPrice: 0, verificationStatus: 'APPROVED', isVerified: true } });
     const clinic = await prisma.clinicProfile.create({ data: { userId: clinicUser.id, name: 'Clínica Principal', address: 'Quito', verificationStatus: 'APPROVED' } });
     const otherDoctor = await prisma.doctorProfile.create({ data: { userId: otherDoctorUser.id, licenseNumber: 'CASH-002', consultationPrice: 0, verificationStatus: 'APPROVED', isVerified: true } });
@@ -168,7 +168,11 @@ describe('pagos en efectivo auditables con PostgreSQL real', () => {
 
     const doctorSummary = await request(app).get('/api/finance/summary').set('Authorization', `Bearer ${doctorToken}`).expect(200);
     expect(doctorSummary.body.metrics).toMatchObject({ confirmedCashCents: 3550, pendingCashCents: 3550, confirmedPaymentCount: 1, pendingPaymentCount: 1, averageConfirmedPaymentCents: 3550 });
-    expect(doctorSummary.body.groups.byDoctor).toHaveLength(1);
+    expect(doctorSummary.body.groups.byDoctor).toBeUndefined();
+    expect(doctorSummary.body.groups.byStatus).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'CONFIRMED', confirmedCashCents: 3550 }),
+      expect.objectContaining({ key: 'PENDING', pendingCashCents: 3550 }),
+    ]));
     const clinicPayments = await request(app).get('/api/finance/payments').set('Authorization', `Bearer ${clinicToken}`).expect(200);
     expect(clinicPayments.body.total).toBe(2);
     const assistantPayments = await request(app).get('/api/finance/payments').set('Authorization', `Bearer ${assistantToken}`).expect(200);
@@ -178,6 +182,36 @@ describe('pagos en efectivo auditables con PostgreSQL real', () => {
     const pending = await request(app).get('/api/cash-payments/pending').set('Authorization', `Bearer ${doctorToken}`).expect(200);
     expect(pending.body).toHaveLength(1);
     await request(app).get('/api/finance/summary').set('Authorization', `Bearer ${patientToken}`).expect(403);
+  });
+
+  it('deriva doctor del JWT, rechaza sede ajena y filtra una sede propia', async () => {
+    await bookCash('2026-09-13T09:00:00-05:00');
+    await request(app).get('/api/cash-payments/pending').query({ doctorId: otherDoctorId }).set('Authorization', `Bearer ${doctorToken}`).expect(422);
+    await request(app).get('/api/finance/summary').query({ doctorId: otherDoctorId }).set('Authorization', `Bearer ${doctorToken}`).expect(422);
+    await request(app).get('/api/cash-payments/pending').query({ clinicId: otherClinicId }).set('Authorization', `Bearer ${doctorToken}`).expect(403);
+    await request(app).get('/api/finance/payments').query({ clinicId: otherClinicId }).set('Authorization', `Bearer ${doctorToken}`).expect(403);
+
+    const secondOwner = await prisma.user.create({ data: { email: 'cash-second-clinic@zenda.test', emailNormalized: 'cash-second-clinic@zenda.test', firstName: 'Segunda', lastName: 'Sede', passwordHash: 'x', role: 'CLINIC_ADMIN' } });
+    const secondClinic = await prisma.clinicProfile.create({ data: { userId: secondOwner.id, name: 'Consultorio Norte', address: 'Quito', verificationStatus: 'APPROVED' } });
+    const workplace = await prisma.doctorClinicWorkplace.create({ data: { doctorProfileId: doctorId, clinicProfileId: secondClinic.id } });
+    await prisma.workSchedule.createMany({ data: Array.from({ length: 7 }, (_, weekday) => ({ workplaceId: workplace.id, weekday, startTime: '08:00', endTime: '18:00' })) });
+    await bookCash('2026-09-14T09:00:00-05:00', { doctorId, clinicId: secondClinic.id, serviceId });
+
+    const filtered = await request(app).get('/api/finance/payments').query({ clinicId: secondClinic.id }).set('Authorization', `Bearer ${doctorToken}`).expect(200);
+    expect(filtered.body.total).toBe(1);
+    expect(filtered.body.items[0].clinic).toMatchObject({ id: secondClinic.id, name: 'Consultorio Norte' });
+    const all = await request(app).get('/api/cash-payments/pending').set('Authorization', `Bearer ${doctorToken}`).expect(200);
+    expect(all.body).toHaveLength(2);
+  });
+
+  it('aplica rangos financieros por día de America/Guayaquil y mantiene centavos exactos', async () => {
+    const booked = await bookCash('2026-09-15T09:00:00-05:00');
+    await prisma.appointment.update({ where: { id: booked.body.id }, data: { startsAt: new Date('2026-09-16T04:30:00.000Z'), endsAt: new Date('2026-09-16T05:15:00.000Z'), startDatetime: new Date('2026-09-16T04:30:00.000Z'), startTime: '23:30', endTime: '00:15' } });
+    const localDay = await request(app).get('/api/finance/summary').query({ from: '2026-09-15', to: '2026-09-15' }).set('Authorization', `Bearer ${doctorToken}`).expect(200);
+    expect(localDay.body.metrics).toMatchObject({ pendingCashCents: 3550, pendingPaymentCount: 1 });
+    expect(localDay.body.groups.byDay).toEqual([expect.objectContaining({ key: '2026-09-15', pendingCashCents: 3550 })]);
+    const nextDay = await request(app).get('/api/finance/payments').query({ from: '2026-09-16', to: '2026-09-16' }).set('Authorization', `Bearer ${doctorToken}`).expect(200);
+    expect(nextDay.body.total).toBe(0);
   });
 
   it('mantiene la ruta heredada como adaptador deprecado al nuevo pago', async () => {

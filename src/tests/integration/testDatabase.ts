@@ -14,6 +14,10 @@ export function assertIntegrationDatabase(): string {
 export async function clearIntegrationDatabase(): Promise<void> {
   assertIntegrationDatabase();
   await prisma.$transaction([
+    prisma.authIdentityLinkAudit.deleteMany(),
+    prisma.notificationDelivery.deleteMany(),
+    prisma.userNotification.deleteMany(),
+    prisma.notificationOutbox.deleteMany(),
     prisma.invitation.deleteMany(),
     prisma.review.deleteMany(),
     prisma.paymentVerificationAttempt.deleteMany(),
@@ -26,6 +30,7 @@ export async function clearIntegrationDatabase(): Promise<void> {
     prisma.patientInvitation.deleteMany(),
     prisma.workSchedule.deleteMany(),
     prisma.doctorClinicWorkplace.deleteMany(),
+    prisma.certificationAuditLog.deleteMany(),
     prisma.certification.deleteMany(),
     prisma.service.deleteMany(),
     prisma.assistantProfile.deleteMany(),

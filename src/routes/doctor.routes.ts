@@ -1,14 +1,26 @@
 import { Router } from 'express';
-import { getDoctors, getDoctorById, createDoctor, getMyAppointments, updateDoctorProfile, addService, addCertification, addWorkSchedule, getMySchedules, addAppointment, createGuestPatient, searchPatients } from '../controllers/doctor.controller';
+import { getDoctors, getDoctorById, createDoctor, getMyAppointments, updateDoctorProfile, addService, addWorkSchedule, getMySchedules, addAppointment, createGuestPatient, searchPatients } from '../controllers/doctor.controller';
 import { authenticate, requireRole } from '../middlewares/auth.middleware';
-import { createMyDoctorService, getMyDoctorProfile, listMyDoctorServices, patchMyDoctorProfile, patchMyDoctorService, patchMyDoctorServiceStatus } from '../controllers/doctorManagement.controller';
+import { createMyDoctorService, getMyDoctorProfile, getMyDoctorWorkspaces, listMyDoctorServices, patchMyDoctorProfile, patchMyDoctorService, patchMyDoctorServiceStatus } from '../controllers/doctorManagement.controller';
 import { correctInvitedPatientEmail, createMyAppointment, getMyWorkSchedules, putMyWorkSchedules } from '../controllers/doctorSchedule.controller';
+import { getMyDoctorDashboardSummary } from '../controllers/doctorDashboard.controller';
+import { getMyDoctorReviews } from '../controllers/review.controller';
+import { deleteMyCertification, getMyCertifications, handleCertificationUploadError, patchMyCertification, postMyCertification, postSubmitCertification, certificationUpload } from '../controllers/certification.controller';
+import { rateLimit } from 'express-rate-limit';
 
 const router = Router();
 
 // Rutas protegidas (Dashboard del doctor)
 router.get('/my-appointments', authenticate, requireRole(['DOCTOR']), getMyAppointments);
 router.get('/me/profile', authenticate, requireRole(['DOCTOR']), getMyDoctorProfile);
+router.get('/me/workspaces', authenticate, requireRole(['DOCTOR']), getMyDoctorWorkspaces);
+router.get('/me/dashboard-summary', authenticate, requireRole(['DOCTOR']), getMyDoctorDashboardSummary);
+router.get('/me/reviews', authenticate, requireRole(['DOCTOR']), getMyDoctorReviews);
+router.get('/me/certifications', authenticate, requireRole(['DOCTOR']), getMyCertifications);
+router.post('/me/certifications', authenticate, requireRole(['DOCTOR']), rateLimit({ windowMs: 15 * 60 * 1000, limit: process.env.NODE_ENV === 'test' ? 1000 : 15, standardHeaders: true, legacyHeaders: false }), certificationUpload, handleCertificationUploadError, postMyCertification);
+router.patch('/me/certifications/:id', authenticate, requireRole(['DOCTOR']), rateLimit({ windowMs: 15 * 60 * 1000, limit: process.env.NODE_ENV === 'test' ? 1000 : 15, standardHeaders: true, legacyHeaders: false }), certificationUpload, handleCertificationUploadError, patchMyCertification);
+router.post('/me/certifications/:id/submit', authenticate, requireRole(['DOCTOR']), postSubmitCertification);
+router.delete('/me/certifications/:id', authenticate, requireRole(['DOCTOR']), deleteMyCertification);
 router.patch('/me/profile', authenticate, requireRole(['DOCTOR']), patchMyDoctorProfile);
 router.get('/me/services', authenticate, requireRole(['DOCTOR']), listMyDoctorServices);
 router.post('/me/services', authenticate, requireRole(['DOCTOR']), createMyDoctorService);
@@ -20,7 +32,6 @@ router.post('/me/appointments', authenticate, requireRole(['DOCTOR']), createMyA
 router.patch('/me/appointments/:id/invited-patient', authenticate, requireRole(['DOCTOR']), correctInvitedPatientEmail);
 router.put('/profile', authenticate, requireRole(['DOCTOR']), updateDoctorProfile);
 router.post('/services', authenticate, requireRole(['DOCTOR']), addService);
-router.post('/certifications', authenticate, requireRole(['DOCTOR']), addCertification);
 router.post('/schedules', authenticate, requireRole(['DOCTOR']), addWorkSchedule);
 router.get('/schedules', authenticate, requireRole(['DOCTOR']), getMySchedules);
 router.post('/appointments', authenticate, requireRole(['DOCTOR']), addAppointment);

@@ -3,7 +3,9 @@ import type { Response } from 'express';
 import type { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
 import { centsToDollars } from '../utils/money';
-import type { CreateDoctorServiceInput, DoctorProfileDto, DoctorServiceDto, UpdateDoctorProfileInput, UpdateDoctorServiceInput, UpdateDoctorServiceStatusInput } from '../dtos/doctor.dto';
+import type { CreateDoctorServiceInput, DoctorProfileDto, DoctorServiceDto, DoctorWorkspaceDto, UpdateDoctorProfileInput, UpdateDoctorServiceInput, UpdateDoctorServiceStatusInput } from '../dtos/doctor.dto';
+import { profileImageUrls } from '../services/image.service';
+import { publicDisplayName } from '../domain/professionalIdentity';
 
 type FieldErrors = Record<string, string>;
 const MAX_NAME_LENGTH = 120;
@@ -53,7 +55,10 @@ async function profileDto(doctorId: string): Promise<DoctorProfileDto | null> {
   if (!doctor) return null;
   return {
     id: doctor.id, firstName: doctor.user.firstName, lastName: doctor.user.lastName, email: doctor.user.email, phone: doctor.user.phone,
-    licenseNumber: doctor.licenseNumber, bio: doctor.bio, languages: doctor.languages, profileImageUrl: doctor.profileImageUrl,
+    licenseNumber: doctor.licenseNumber, bio: doctor.bio, languages: doctor.languages, profileImageUrl: doctor.profileImageUrl, profileImageUrls: profileImageUrls(doctor.profileImageUrl),
+    professionCode: doctor.professionCode, displayTitle: doctor.displayTitle, customDisplayTitle: doctor.customDisplayTitle,
+    publicDisplayName: publicDisplayName(doctor.user.firstName, doctor.user.lastName, doctor.displayTitle, doctor.customDisplayTitle),
+    primarySpecialtyName: doctor.specialties[0]?.name ?? null,
     specialties: doctor.specialties, insurances: doctor.insurances, availableSpecialties, availableInsurances,
   };
 }
@@ -85,6 +90,50 @@ export async function getMyDoctorProfile(req: AuthRequest, res: Response) {
   return res.json(dto);
 }
 
+export async function getMyDoctorWorkspaces(req: AuthRequest, res: Response) {
+  const doctor = await prisma.doctorProfile.findUnique({
+    where: { userId: req.user!.id },
+    select: {
+      id: true,
+      isIndependent: true,
+      workplaces: {
+        where: { isActive: true },
+        select: {
+          clinicProfile: { select: { id: true, name: true, type: true } },
+        },
+        orderBy: { joinedAt: 'asc' },
+      },
+    },
+  });
+  if (!doctor) return res.status(404).json({ error: 'DOCTOR_PROFILE_NOT_FOUND' });
+
+  const locations: DoctorWorkspaceDto['locations'] = doctor.workplaces.map(({ clinicProfile }) => ({
+    id: clinicProfile.id,
+    name: clinicProfile.name,
+    type: clinicProfile.type === 'INDEPENDENT_PRACTICE' ? 'INDEPENDENT_OFFICE' : 'CLINIC',
+    isActive: true,
+  }));
+  const requestedClinicId = typeof req.query.clinicId === 'string' ? req.query.clinicId.trim() : '';
+  if (requestedClinicId && requestedClinicId !== 'all' && !locations.some(({ id }) => id === requestedClinicId)) {
+    return res.status(403).json({
+      error: 'CLINIC_NOT_LINKED',
+      message: 'La sede no está vinculada activamente a tu perfil.',
+    });
+  }
+  const selectedClinicId = requestedClinicId && requestedClinicId !== 'all' ? requestedClinicId : null;
+  const selectedLocation = selectedClinicId ? locations.find(({ id }) => id === selectedClinicId) : undefined;
+  const hasIndependentOffice = locations.some(({ type }) => type === 'INDEPENDENT_OFFICE');
+  const dto: DoctorWorkspaceDto = {
+    doctorProfileId: doctor.id,
+    mode: selectedLocation
+      ? (selectedLocation.type === 'INDEPENDENT_OFFICE' ? 'INDEPENDENT' : 'CLINIC')
+      : (hasIndependentOffice && locations.every(({ type }) => type === 'INDEPENDENT_OFFICE') ? 'INDEPENDENT' : 'CLINIC'),
+    selectedClinicId,
+    locations,
+  };
+  return res.json(dto);
+}
+
 export async function patchMyDoctorProfile(req: AuthRequest, res: Response) {
   const doctor = await ownDoctor(req.user!.id);
   if (!doctor) return res.status(404).json({ error: 'DOCTOR_PROFILE_NOT_FOUND' });
@@ -97,10 +146,23 @@ export async function patchMyDoctorProfile(req: AuthRequest, res: Response) {
   const languages = input.languages === undefined ? undefined : idList(input.languages, 'languages', errors);
   const specialtyIds = idList(input.specialtyIds, 'specialtyIds', errors);
   const insuranceIds = idList(input.insuranceIds, 'insuranceIds', errors);
+  const professionCodes = ['MEDICINE', 'DENTISTRY', 'PSYCHOLOGY', 'NURSING', 'OTHER'] as const;
+  const professionalTitles = ['DR', 'DRA', 'DENTIST_MALE', 'DENTIST_FEMALE', 'PSYCHOLOGIST_MALE', 'PSYCHOLOGIST_FEMALE', 'LICENSED_MALE', 'LICENSED_FEMALE', 'OTHER'] as const;
+  const professionCode = input.professionCode === undefined ? undefined : input.professionCode;
+  const displayTitle = input.displayTitle === undefined ? undefined : input.displayTitle;
+  const customDisplayTitle = optionalText(input.customDisplayTitle, 40);
   if (input.firstName !== undefined && !firstName) errors.firstName = 'El nombre es obligatorio y debe tener máximo 120 caracteres.';
   if (input.lastName !== undefined && !lastName) errors.lastName = 'El apellido es obligatorio y debe tener máximo 120 caracteres.';
   if (input.phone !== undefined && phone === undefined) errors.phone = 'El teléfono debe tener máximo 32 caracteres.';
   if (input.bio !== undefined && bio === undefined) errors.bio = 'La biografía debe tener máximo 1000 caracteres.';
+  if (professionCode !== undefined && professionCode !== null && !professionCodes.includes(professionCode)) errors.professionCode = 'Selecciona una profesión válida.';
+  if (displayTitle !== undefined && displayTitle !== null && !professionalTitles.includes(displayTitle)) errors.displayTitle = 'Selecciona un título profesional válido.';
+  if (input.customDisplayTitle !== undefined && customDisplayTitle === undefined) errors.customDisplayTitle = 'El título personalizado debe tener máximo 40 caracteres.';
+  if (typeof customDisplayTitle === 'string' && !/^[\p{L}][\p{L}\p{M} .'-]{0,39}$/u.test(customDisplayTitle)) errors.customDisplayTitle = 'El título personalizado contiene caracteres no permitidos.';
+  const resultingTitle = displayTitle === undefined ? doctor.displayTitle : displayTitle;
+  const resultingCustomTitle = customDisplayTitle === undefined ? doctor.customDisplayTitle : customDisplayTitle;
+  if (resultingTitle === 'OTHER' && !resultingCustomTitle) errors.customDisplayTitle = 'Escribe el título profesional que deseas mostrar.';
+  if (resultingTitle !== 'OTHER' && resultingCustomTitle) errors.customDisplayTitle = 'El título personalizado solo se usa con la opción Otro.';
   const [specialtyCount, insuranceCount] = await Promise.all([
     specialtyIds === undefined ? Promise.resolve(0) : prisma.specialty.count({ where: { id: { in: specialtyIds } } }),
     insuranceIds === undefined ? Promise.resolve(0) : prisma.insurance.count({ where: { id: { in: insuranceIds } } }),
@@ -115,7 +177,7 @@ export async function patchMyDoctorProfile(req: AuthRequest, res: Response) {
     if (typeof lastName === 'string') userData.lastName = lastName;
     if (phone !== undefined) userData.phone = phone;
     if (Object.keys(userData).length > 0) await tx.user.update({ where: { id: doctor.userId }, data: userData });
-    await tx.doctorProfile.update({ where: { id: doctor.id }, data: { ...(bio !== undefined ? { bio } : {}), ...(languages !== undefined ? { languages } : {}), ...(specialtyIds !== undefined ? { specialties: { set: specialtyIds.map((id) => ({ id })) } } : {}), ...(insuranceIds !== undefined ? { insurances: { set: insuranceIds.map((id) => ({ id })) } } : {}) } });
+    await tx.doctorProfile.update({ where: { id: doctor.id }, data: { ...(bio !== undefined ? { bio } : {}), ...(languages !== undefined ? { languages } : {}), ...(professionCode !== undefined ? { professionCode } : {}), ...(displayTitle !== undefined ? { displayTitle } : {}), ...(customDisplayTitle !== undefined ? { customDisplayTitle } : {}), ...(specialtyIds !== undefined ? { specialties: { set: specialtyIds.map((id) => ({ id })) } } : {}), ...(insuranceIds !== undefined ? { insurances: { set: insuranceIds.map((id) => ({ id })) } } : {}) } });
   });
   return res.json(await profileDto(doctor.id));
 }

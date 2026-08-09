@@ -3,15 +3,15 @@ import { Prisma } from '../../generated/prisma';
 import type { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
 import type {
-  CreateDoctorAppointmentInput,
   DoctorWorkScheduleInput,
   SaveDoctorWorkSchedulesInput,
 } from '../dtos/schedule.dto';
+import { parseCreateDoctorAppointment, parseInvitedPatient } from '../dtos/schedule.dto';
 import { BookingError, createAppointment } from '../services/appointmentBooking.service';
-import { emailService } from '../services/email.service';
 import { APP_TIMEZONE, minutes } from '../utils/scheduling';
 import { canExposeDevelopmentToken } from '../services/emailIdentity.service';
 import { resolvePatientInvitation } from '../services/patientInvitation.service';
+import { enqueueNotification } from '../services/notificationOutbox.service';
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -196,26 +196,14 @@ export async function putMyWorkSchedules(req: AuthRequest, res: Response) {
 export async function createMyAppointment(req: AuthRequest, res: Response) {
   const doctor = await ownDoctor(req.user!.id);
   if (!doctor) return error(res, 404, 'DOCTOR_PROFILE_NOT_FOUND', 'No existe un perfil médico para esta sesión.');
-  const input = req.body as Partial<CreateDoctorAppointmentInput>;
-  const fields: Record<string, string> = {};
-  for (const field of ['clinicId', 'serviceId', 'startsAt'] as const) {
-    if (typeof input[field] !== 'string' || !input[field]?.trim()) fields[field] = 'Este campo es obligatorio.';
-  }
-  const patient = input.patient || (typeof input.patientId === 'string' ? { id: input.patientId } : undefined);
-  const selectedPatient = patient && typeof patient.id === 'string' && patient.id.trim();
-  const invitedPatient = patient && !selectedPatient;
-  if (!patient || (!selectedPatient && (!patient.email || !patient.firstName || !patient.lastName))) {
-    fields.patient = 'Selecciona un paciente existente o ingresa nombre, apellido y correo.';
-  }
-  if (input.sendEmail !== undefined && typeof input.sendEmail !== 'boolean') fields.sendEmail = 'Debe ser verdadero o falso.';
-  if (Object.keys(fields).length > 0) return error(res, 400, 'INVALID_INPUT', 'Revisa los datos de la cita.', fields);
-
-  const clinicId = input.clinicId!.trim();
+  const parsed = parseCreateDoctorAppointment(req.body);
+  if (!parsed.success) return error(res, 422, 'VALIDATION_ERROR', 'Revisa los datos de la cita.', parsed.fields);
+  const { clinicId, serviceId, startsAt, sendEmail, patient } = parsed.data;
   const { clinic, workplace } = await linkedWorkplace(doctor.id, clinicId);
   if (!clinic) return error(res, 404, 'CLINIC_NOT_FOUND', 'La clínica indicada no existe.');
   if (!workplace?.isActive) return error(res, 403, 'CLINIC_NOT_LINKED', 'La clínica no está vinculada activamente a tu perfil.');
   const service = await prisma.service.findFirst({
-    where: { id: input.serviceId!.trim(), doctorProfileId: doctor.id, isActive: true },
+    where: { id: serviceId, doctorProfileId: doctor.id, isActive: true },
   });
   if (!service) return error(res, 404, 'SERVICE_NOT_AVAILABLE', 'El servicio no pertenece al médico o no está activo.');
   if (service.clinicProfileId && service.clinicProfileId !== clinicId) {
@@ -224,36 +212,23 @@ export async function createMyAppointment(req: AuthRequest, res: Response) {
 
   try {
     const appointment = await createAppointment({
-      ...(selectedPatient ? { patientUserId: patient!.id!.trim() } : {
+      ...(patient.kind === 'registered' ? { patientUserId: patient.id } : {
         invitedPatient: {
-          email: patient!.email!.trim(),
-          firstName: patient!.firstName!.trim(),
-          lastName: patient!.lastName!.trim(),
-          phone: typeof patient!.phone === 'string' ? patient!.phone : null,
+          ...patient.patient,
           invitedByUserId: req.user!.id,
         },
       }),
       doctorId: doctor.id,
       clinicId,
       serviceId: service.id,
-      requestedStart: input.startsAt,
+      requestedStart: startsAt,
       paymentMethod: 'NONE',
     });
     const recipient = appointment.patientRecipient;
-    if (recipient?.invitationToken && recipient.invitationExpiresAt) {
-      emailService.sendPatientInvitationEmail({ to: recipient.email, firstName: recipient.firstName, token: recipient.invitationToken, expiresAt: recipient.invitationExpiresAt }).catch((caught) => console.error('[Patient invitation email]', caught));
-    }
-    if (input.sendEmail && recipient) {
-        const startsAt = appointment.startsAt ?? new Date(input.startsAt!);
-        emailService.sendDoctorAppointmentConfirmation({
-          to: recipient.email,
-          patientName: recipient.firstName,
-          date: new Intl.DateTimeFormat('es-EC', { timeZone: APP_TIMEZONE, dateStyle: 'full' }).format(startsAt),
-          time: new Intl.DateTimeFormat('es-EC', { timeZone: APP_TIMEZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(startsAt),
-          doctorName: `${doctor.user.firstName} ${doctor.user.lastName}`.trim(),
-          clinicName: clinic.name,
-        }).catch((caught) => console.error('[Doctor appointment email]', caught));
-    }
+    // Notification delivery is persisted transactionally by createAppointment.
+    // sendEmail remains accepted for backwards compatibility; user preferences
+    // will be evaluated by the worker when that preference model is introduced.
+    void sendEmail;
     const { patientRecipient: _recipient, ...responseAppointment } = appointment;
     return res.status(201).json({ ...responseAppointment, patientLink: recipient?.invitationToken ? { status: 'PENDING', ...(canExposeDevelopmentToken() ? { developmentToken: recipient.invitationToken } : {}) } : { status: 'REGISTERED' } });
   } catch (caught) {
@@ -270,8 +245,9 @@ export async function createMyAppointment(req: AuthRequest, res: Response) {
 export async function correctInvitedPatientEmail(req: AuthRequest, res: Response) {
   const doctor = await ownDoctor(req.user!.id);
   if (!doctor) return error(res, 404, 'DOCTOR_PROFILE_NOT_FOUND', 'No existe un perfil médico para esta sesión.');
-  const patient = req.body?.patient as { email?: unknown; firstName?: unknown; lastName?: unknown; phone?: unknown } | undefined;
-  if (!patient || typeof patient.email !== 'string' || typeof patient.firstName !== 'string' || typeof patient.lastName !== 'string') return error(res, 400, 'INVALID_PATIENT', 'Envía nombre, apellido y correo del paciente.');
+  const parsedPatient = parseInvitedPatient(req.body?.patient);
+  if (!parsedPatient.success) return error(res, 422, 'VALIDATION_ERROR', 'Revisa los datos del paciente.', parsedPatient.fields);
+  const patient = parsedPatient.data;
   try {
     const result = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${doctor.id}))`;
@@ -286,9 +262,9 @@ export async function correctInvitedPatientEmail(req: AuthRequest, res: Response
       }
       const updated = await tx.appointment.update({ where: { id: appointment.id }, data: { patientId: resolution.patient?.id ?? null, patientInvitationId: resolution.invitation?.id ?? null, invitedPatientFirstName: resolution.invitation?.firstName ?? null, invitedPatientLastName: resolution.invitation?.lastName ?? null, invitedPatientEmail: resolution.invitation?.email ?? null, invitedPatientPhone: resolution.invitation?.phone ?? null } });
       await tx.appointmentChangeLog.create({ data: { appointmentId: appointment.id, changedByUserId: req.user!.id, changeType: 'STATUS_CHANGED', previousStatus: appointment.status, newStatus: appointment.status, reason: 'INVITED_PATIENT_EMAIL_CORRECTED' } });
+      if (resolution.invitationToken && resolution.invitation) await enqueueNotification(tx, { eventType: 'PATIENT_INVITED', aggregateId: appointment.id, deduplicationKey: `patient-invitation:${resolution.invitation.id}`, secret: { token: resolution.invitationToken } });
       return { appointment: updated, recipient: resolution.invitation ? { email: resolution.invitation.email, firstName: resolution.invitation.firstName, token: resolution.invitationToken, expiresAt: resolution.invitation.expiresAt } : null };
     });
-    if (result.recipient?.token) emailService.sendPatientInvitationEmail({ to: result.recipient.email, firstName: result.recipient.firstName, token: result.recipient.token, expiresAt: result.recipient.expiresAt }).catch((caught) => console.error('[Patient invitation email]', caught));
     return res.json({ appointment: result.appointment, patientLink: result.recipient?.token ? { status: 'PENDING', ...(canExposeDevelopmentToken() ? { developmentToken: result.recipient.token } : {}) } : { status: 'REGISTERED' } });
   } catch (caught) {
     if (caught instanceof BookingError) return error(res, caught.status, caught.code, caught.message);

@@ -6,7 +6,6 @@ import { syncAppointmentToCalendar, updateCalendarEventStatus, deleteCalendarEve
 import { canAccessAppointment } from '../services/appointmentAuthorization.service';
 import { getAppointmentCalendarPresentation } from '../services/appointmentCalendarPresentation.service';
 import { confirmPatientAppointment } from '../services/appointmentConfirmation.service';
-import { completeAppointment, markAppointmentNoShow, startAppointment } from '../services/appointmentLifecycle.service';
 import { confirmLegacyCashPayment } from '../services/legacyCashPayment.service';
 
 const legacyActor = (req: AuthRequest) => ({ id: req.user!.id, role: req.user!.role });
@@ -189,7 +188,7 @@ export const cancelAppointmentByPatient = async (req: AuthRequest, res: Response
     const { cancellationReason } = req.body;
     if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
     deprecated(res, '/api/bookings/:id/cancel');
-    const updatedAppointment = await cancelAppointment(appointmentId, req.user.id, typeof cancellationReason === 'string' ? cancellationReason : undefined);
+    const updatedAppointment = await cancelAppointment(appointmentId, req.user.id, { reason: typeof cancellationReason === 'string' ? cancellationReason : undefined, actorRole: req.user.role });
 
     // Eliminamos el evento del calendario para liberar la agenda
     deleteCalendarEvent(appointmentId).catch(console.error);
@@ -306,19 +305,9 @@ export const getAppointmentById = async (req: AuthRequest, res: Response) => {
 };
 
 export const updateBookingStatus = async (req: AuthRequest, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-    if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
-    deprecated(res, 'Use /cancel, /start, /complete or /no-show according to the transition');
-    let appointment;
-    if (status === 'IN_PROGRESS') appointment = await startAppointment(String(id), legacyActor(req));
-    else if (status === 'COMPLETED') appointment = await completeAppointment(String(id), legacyActor(req));
-    else if (status === 'MISSED') appointment = await markAppointmentNoShow(String(id), legacyActor(req));
-    else if (status === 'CANCELLED') appointment = await cancelAppointment(String(id), req.user.id, typeof req.body.reason === 'string' ? req.body.reason : undefined);
-    else return res.status(422).json({ error: 'LEGACY_STATUS_TRANSITION_NOT_SUPPORTED', message: 'Usa la ruta canónica de confirmación, cancelación o ciclo operativo.' });
-    return res.json({ message: 'Estado actualizado correctamente', appointment });
-  } catch (error) {
-    return domainError(error, res);
-  }
+  if (!req.user) return res.status(401).json({ error: 'UNAUTHORIZED' });
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Sunset', 'Tue, 28 Jul 2026 00:00:00 GMT');
+  res.setHeader('Link', '</api/bookings/:id/cancel>; rel="successor-version", </api/bookings/:id/start>; rel="successor-version", </api/bookings/:id/complete>; rel="successor-version", </api/bookings/:id/no-show>; rel="successor-version"');
+  return res.status(410).json({ error: 'LEGACY_APPOINTMENT_STATUS_ROUTE_RETIRED', message: 'Usa la acción canónica correspondiente.' });
 };

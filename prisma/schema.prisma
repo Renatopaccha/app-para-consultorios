@@ -82,6 +82,31 @@ enum VerificationStatus {
   SUSPENDED
 }
 
+enum ClinicType {
+  CLINIC
+  INDEPENDENT_PRACTICE
+}
+
+enum ProfessionCode {
+  MEDICINE
+  DENTISTRY
+  PSYCHOLOGY
+  NURSING
+  OTHER
+}
+
+enum ProfessionalTitle {
+  DR
+  DRA
+  DENTIST_MALE
+  DENTIST_FEMALE
+  PSYCHOLOGIST_MALE
+  PSYCHOLOGIST_FEMALE
+  LICENSED_MALE
+  LICENSED_FEMALE
+  OTHER
+}
+
 enum Currency {
   USD
 }
@@ -121,6 +146,40 @@ enum ScheduleBlockType {
   PERSONAL
 }
 
+enum ScheduleBlockVisibility {
+  PRIVATE
+  PUBLIC_LABEL
+}
+
+enum ScheduleBlockChangeType {
+  CREATED
+  UPDATED
+  UNBLOCKED
+}
+
+enum NotificationOutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+}
+
+enum CertificationStatus {
+  DRAFT
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum AuthIdentityLinkEvent {
+  LINKED
+  LINK_REJECTED
+  COLLISION
+  UNLINKED
+  SUSPENDED
+}
+
 // ---------------------------------------------------------------------------
 // 1. MODELO CENTRAL: USER Y SEGURIDAD
 // ---------------------------------------------------------------------------
@@ -130,13 +189,14 @@ model User {
   firstName String
   lastName  String
   email     String  @unique
-  // All new writes populate this canonical form. It stays nullable only while
-  // pre-existing installations are backfilled by the migration.
-  emailNormalized String? @unique
+  // Canonical identity used for all authentication and uniqueness checks.
+  emailNormalized String @unique
   phone     String?
   role      Role    @default(PATIENT)
 
   // Auth & SSO
+  // External identity only. User.id remains the canonical Zenda identifier.
+  clerkUserId String? @unique
   passwordHash String?
   provider     String? // "google", "apple", "local"
   googleId     String? @unique
@@ -148,9 +208,9 @@ model User {
   twoFactorCode        String?
   twoFactorExpires     DateTime?
   is2FAEnabled         Boolean   @default(false)
-  emailVerifiedAt            DateTime?
+  emailVerifiedAt            DateTime? @db.Timestamptz(3)
   emailVerificationTokenHash String?   @unique
-  emailVerificationExpires   DateTime?
+  emailVerificationExpires   DateTime? @db.Timestamptz(3)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -170,10 +230,35 @@ model User {
   paymentEvents               PaymentEvent[]               @relation("PaymentEventActor")
   paymentIdempotencyKeys      PaymentIdempotencyKey[]
   paymentVerificationAttempts PaymentVerificationAttempt[] @relation("PaymentAttemptActor")
+  notifications               UserNotification[]
+  certificationsReviewed      Certification[]               @relation("CertificationReviewer")
+  certificationAuditEvents    CertificationAuditLog[]        @relation("CertificationAuditActor")
+  identityLinkAudits          AuthIdentityLinkAudit[]         @relation("AuthIdentityLinkTarget")
+  identityLinkActions         AuthIdentityLinkAudit[]         @relation("AuthIdentityLinkActor")
 
   @@index([email])
   @@index([resetPasswordToken])
   @@index([role])
+}
+
+/// Immutable audit trail for manual identity-link operations. It intentionally
+/// contains no credential, JWT, raw IP address, or Clerk payload.
+model AuthIdentityLinkAudit {
+  id          String                @id @default(uuid())
+  userId      String?
+  clerkUserId String
+  event       AuthIdentityLinkEvent
+  actorUserId String?
+  reasonCode  String?
+  requestId   String?
+  createdAt   DateTime              @default(now())
+
+  user  User? @relation("AuthIdentityLinkTarget", fields: [userId], references: [id], onDelete: SetNull)
+  actor User? @relation("AuthIdentityLinkActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([clerkUserId, createdAt])
+  @@index([event, createdAt])
 }
 
 model SecurityLog {
@@ -202,6 +287,7 @@ model ClinicProfile {
   latitude  Float?
   longitude Float?
   color     String? @db.VarChar(7)
+  type      ClinicType @default(CLINIC)
 
   // Pagos y Suscripciones
   kushkiCardToken    String?
@@ -251,6 +337,9 @@ model DoctorProfile {
   isIndependent      Boolean            @default(false)
   bio                String?
   profileImageUrl    String?
+  professionCode     ProfessionCode?
+  displayTitle       ProfessionalTitle?
+  customDisplayTitle String?             @db.VarChar(40)
   languages          String[]
   portfolioImages    String[]
   isAvailable        Boolean            @default(true)
@@ -408,6 +497,9 @@ model Appointment {
   verificationCode               String?       @unique
   commissionAmount               Float?
   cancellationReason             String?
+  cancellationReasonCode         String?
+  cancellationInternalNote       String?
+  cancellationPatientMessage     String?
   // Historical values are nullable only while legacy appointments are backfilled.
   serviceNameSnapshot            String?
   servicePriceCentsSnapshot      Int?
@@ -434,8 +526,8 @@ model Appointment {
   outlookEventId String?
 
   // Relaciones
-  patient       User?                  @relation("PatientAppointments", fields: [patientId], references: [id])
-  patientInvitation PatientInvitation? @relation(fields: [patientInvitationId], references: [id])
+  patient       User?                  @relation("PatientAppointments", fields: [patientId], references: [id], onDelete: Restrict)
+  patientInvitation PatientInvitation? @relation(fields: [patientInvitationId], references: [id], onDelete: Restrict)
   doctorProfile DoctorProfile          @relation(fields: [doctorProfileId], references: [id])
   clinicProfile ClinicProfile          @relation(fields: [clinicProfileId], references: [id])
   service       Service                @relation(fields: [serviceId], references: [id])
@@ -452,6 +544,8 @@ model Appointment {
   @@index([date])
   @@index([status])
   @@index([startsAt])
+  @@index([servicePriceCentsSnapshot], map: "Appointment_servicePriceCentsSnapshot_idx")
+  @@index([confirmationDeadlineAt], map: "Appointment_confirmationDeadlineAt_idx")
 }
 
 model PatientInvitation {
@@ -577,18 +671,18 @@ model AppointmentTurn {
   turnNumber      Int
   queueOrder      Int
   status          TurnStatus  @default(WAITING)
-  assignedAt      DateTime    @default(now())
+  assignedAt      DateTime    @default(now()) @db.Timestamptz(3)
   calledAt        DateTime?   @db.Timestamptz(3)
   delayedAt       DateTime?   @db.Timestamptz(3)
   startedAt       DateTime?   @db.Timestamptz(3)
   completedAt     DateTime?   @db.Timestamptz(3)
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  createdAt       DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime    @updatedAt @db.Timestamptz(3)
   appointment     Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
-  @@unique([doctorProfileId, clinicProfileId, localDate, turnNumber])
-  @@unique([doctorProfileId, clinicProfileId, localDate, queueOrder])
-  @@index([doctorProfileId, clinicProfileId, localDate, status])
+  @@unique([doctorProfileId, clinicProfileId, localDate, turnNumber], map: "AppointmentTurn_doctor_clinic_date_number_key")
+  @@unique([doctorProfileId, clinicProfileId, localDate, queueOrder], map: "AppointmentTurn_doctor_clinic_date_order_key")
+  @@index([doctorProfileId, clinicProfileId, localDate, status], map: "AppointmentTurn_queue_idx")
 }
 
 model AppointmentChangeLog {
@@ -603,29 +697,113 @@ model AppointmentChangeLog {
   previousStatus   AppointmentStatus?
   newStatus        AppointmentStatus?
   reason           String?
-  createdAt        DateTime              @default(now())
+  createdAt        DateTime              @default(now()) @db.Timestamptz(3)
   appointment      Appointment           @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
   @@index([appointmentId, createdAt])
 }
 
 model ScheduleBlock {
-  id              String   @id @default(uuid())
+  id              String                  @id @default(uuid())
   doctorProfileId String
   clinicProfileId String?
-  startsAt        DateTime @db.Timestamptz(3)
-  endsAt          DateTime @db.Timestamptz(3)
-  type            ScheduleBlockType @default(BLOCK)
+  startsAt        DateTime                @db.Timestamptz(3)
+  endsAt          DateTime                @db.Timestamptz(3)
+  type            ScheduleBlockType       @default(BLOCK)
+  visibility      ScheduleBlockVisibility @default(PRIVATE)
+  /// Public text is intentionally restricted by the API to an allow-list.
+  publicLabel     String?
+  /// Never returned from public availability APIs.
+  privateTitle    String?
+  /// Operational note for authorized staff only; never used in availability.
+  internalNotes   String?
+  /// Legacy compatibility field. New writes mirror the private title here.
   reason          String?
   createdByUserId String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  updatedByUserId String?
+  deletedByUserId String?
+  deletedAt       DateTime?               @db.Timestamptz(3)
+  createdAt       DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime                @updatedAt @db.Timestamptz(3)
 
   doctorProfile DoctorProfile  @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
   clinicProfile ClinicProfile? @relation(fields: [clinicProfileId], references: [id], onDelete: Cascade)
+  changeLogs    ScheduleBlockChangeLog[]
 
   @@index([doctorProfileId, startsAt])
   @@index([clinicProfileId, startsAt])
+  @@index([doctorProfileId, deletedAt, startsAt])
+}
+
+model ScheduleBlockChangeLog {
+  id             String                  @id @default(uuid())
+  scheduleBlockId String
+  changedByUserId String
+  changeType     ScheduleBlockChangeType
+  previousValue  Json?
+  newValue       Json?
+  createdAt      DateTime                @default(now())
+
+  scheduleBlock ScheduleBlock @relation(fields: [scheduleBlockId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleBlockId, createdAt])
+  @@index([changedByUserId, createdAt])
+}
+
+model NotificationOutbox {
+  id               String                   @id @default(uuid())
+  eventType        String
+  aggregateType    String
+  aggregateId      String
+  payload          Json
+  encryptedPayload String?
+  deduplicationKey String                   @unique
+  status           NotificationOutboxStatus @default(PENDING)
+  attempts         Int                      @default(0)
+  availableAt      DateTime                 @default(now()) @db.Timestamptz(3)
+  processedAt      DateTime?                @db.Timestamptz(3)
+  lockedAt         DateTime?                @db.Timestamptz(3)
+  lockToken        String?
+  lastError        String?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  deliveries       NotificationDelivery[]
+
+  @@index([status, availableAt])
+  @@index([aggregateType, aggregateId])
+  @@index([lockedAt])
+}
+
+model NotificationDelivery {
+  id          String   @id @default(uuid())
+  outboxId    String
+  channel     String
+  status      String
+  processedAt DateTime? @db.Timestamptz(3)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  outbox NotificationOutbox @relation(fields: [outboxId], references: [id], onDelete: Cascade)
+
+  @@unique([outboxId, channel])
+  @@index([status, updatedAt])
+}
+
+model UserNotification {
+  id        String   @id @default(uuid())
+  userId    String
+  outboxId  String
+  type      String
+  title     String
+  message   String
+  data      Json?
+  readAt    DateTime? @db.Timestamptz(3)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@unique([userId, outboxId])
 }
 
 model Review {
@@ -645,6 +823,7 @@ model Review {
   doctorProfile DoctorProfile @relation(fields: [doctorProfileId], references: [id])
 
   @@index([doctorProfileId])
+  @@index([doctorProfileId, createdAt(sort: Desc)], map: "Review_doctorProfileId_createdAt_idx")
   @@index([patientId])
 }
 
@@ -675,18 +854,51 @@ model Service {
 }
 
 model Certification {
-  id          String @id @default(uuid())
-  name        String
-  institution String
-  year        Int?
+  id               String              @id @default(uuid())
+  title            String              @map("name")
+  institution      String
+  year             Int?
+  credentialNumber String?
+  issuedAt         DateTime?           @db.Date
+  expiresAt        DateTime?           @db.Date
+  documentUrl      String?
+  documentPublicId String?
+  documentMimeType String?
+  documentSizeBytes Int?
+  documentFormat   String?
+  status           CertificationStatus @default(DRAFT)
+  rejectionReason  String?
+  submittedAt      DateTime?           @db.Timestamptz(3)
+  reviewedAt       DateTime?           @db.Timestamptz(3)
+  reviewedByUserId String?
+  deletedAt        DateTime?           @db.Timestamptz(3)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   doctorProfileId String
   doctorProfile   DoctorProfile @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
+  reviewedBy       User?         @relation("CertificationReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  auditLogs        CertificationAuditLog[]
 
-  @@index([doctorProfileId])
+  @@index([doctorProfileId, status])
+  @@index([reviewedByUserId])
+  @@index([deletedAt])
+}
+
+model CertificationAuditLog {
+  id              String   @id @default(uuid())
+  certificationId String
+  actorUserId     String?
+  action          String
+  reason          String?
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  certification Certification @relation(fields: [certificationId], references: [id], onDelete: Restrict)
+  actor           User?         @relation("CertificationAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([certificationId, createdAt])
+  @@index([actorUserId])
 }
 
 model WorkSchedule {

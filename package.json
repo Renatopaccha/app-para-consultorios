@@ -6,6 +6,7 @@
   "scripts": {
     "test": "npm run test:unit",
     "dev": "nodemon --exec ts-node src/server.ts",
+    "dev:update-doctor-email": "NODE_ENV=development ts-node scripts/updateDevDoctorEmail.ts",
     "db:seed": "prisma db seed",
     "db:test:up": "docker compose -f docker-compose.test.yml up -d --wait",
     "db:test:down": "docker compose -f docker-compose.test.yml down -v",
@@ -20,6 +21,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@clerk/express": "^2.1.52",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.6.0",
     "bcrypt": "^6.0.0",

@@ -1,69 +1,32 @@
 import cron from 'node-cron';
 import prisma from '../prisma';
-import { emailService } from '../services/email.service';
 import { expirePendingConfirmations } from '../services/appointmentConfirmation.service';
+import { enqueueNotification } from '../services/notificationOutbox.service';
+
+export async function enqueueDueAppointmentReminders(now = new Date()): Promise<number> {
+  let queued = 0;
+  const windows = [
+    { kind: '24H' as const, fromHours: 23, toHours: 25, flag: 'reminder24hSent' as const },
+    { kind: '2H' as const, fromHours: 1.75, toHours: 2.25, flag: 'reminder2hSent' as const },
+    { kind: '1H' as const, fromHours: .75, toHours: 1.25, flag: 'reminder1hSent' as const },
+  ];
+  for (const window of windows) {
+    const appointments = await prisma.appointment.findMany({ where: { startsAt: { gte: new Date(now.getTime() + window.fromHours * 60 * 60_000), lt: new Date(now.getTime() + window.toHours * 60 * 60_000) }, status: { in: ['PENDING', 'CONFIRMED'] }, [window.flag]: false } });
+    for (const appointment of appointments) {
+      const created = await prisma.$transaction(async tx => {
+        const changed = await tx.appointment.updateMany({ where: { id: appointment.id, status: { in: ['PENDING', 'CONFIRMED'] }, startsAt: appointment.startsAt, [window.flag]: false }, data: { [window.flag]: true } });
+        if (changed.count !== 1) return false;
+        await enqueueNotification(tx, { eventType: 'APPOINTMENT_REMINDER', aggregateId: appointment.id, deduplicationKey: `appointment:${appointment.id}:reminder-${window.kind.toLowerCase()}:${appointment.startsAt?.toISOString()}`, payload: { reminderKind: window.kind, newStartsAt: appointment.startsAt?.toISOString() } });
+        return true;
+      });
+      if (created) queued++;
+    }
+  }
+  return queued;
+}
 
 export const startCronJobs = () => {
-  console.log('[Cron Jobs] Inicializando el vigilante de citas...');
-
-  // Job 1 (Recordatorio 24h): Se ejecuta al minuto 0 de cada hora
-  cron.schedule('0 * * * *', async () => {
-    try {
-      console.log('[Cron Job 1] Buscando citas para enviar recordatorios de 24h...');
-      
-      const now = new Date();
-      // Ventana: desde 24 horas a 25 horas en el futuro
-      const startWindow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-      const endWindow = new Date(now.getTime() + 25 * 60 * 60 * 1000);
-
-      const appointments = await prisma.appointment.findMany({
-        where: {
-          date: {
-            gte: startWindow,
-            lt: endWindow
-          },
-          status: { in: ['PENDING', 'CONFIRMED'] },
-          reminder24hSent: false
-        },
-        include: {
-          patient: true,
-          patientInvitation: { select: { email: true } },
-          doctorProfile: {
-            include: { user: true }
-          }
-        }
-      });
-
-      for (const appt of appointments) {
-        const patientEmail = appt.patient?.email || appt.patientInvitation?.email;
-        if (!patientEmail) continue;
-        const doctorName = `${appt.doctorProfile.user.firstName} ${appt.doctorProfile.user.lastName}`;
-        const dateStr = appt.date.toISOString().split('T')[0] || '';
-
-        if (appt.paymentMethod === 'CARD' || appt.paymentMethod === 'NONE') {
-          await emailService.sendCardReminderEmail(patientEmail, doctorName, dateStr, appt.startTime);
-        } else if (appt.paymentMethod === 'CASH' && appt.status === 'PENDING') {
-          await emailService.sendCashConfirmationPromptEmail(patientEmail, doctorName, dateStr, appt.startTime);
-        }
-
-        // Marcar como enviado para no repetir
-        await prisma.appointment.update({
-          where: { id: appt.id },
-          data: { reminder24hSent: true }
-        });
-      }
-    } catch (error) {
-      console.error('[Cron Job 1] Error ejecutando recordatorio 24h:', error);
-    }
-  });
-
-  // Job 2: compatibility scheduler. Confirmation deadline is canonical; payment never cancels a booking.
-  cron.schedule('0 * * * *', async () => {
-    try {
-      const expired = await expirePendingConfirmations(new Date());
-      if (expired) console.log(`[Cron Job 2] ${expired} cita(s) expirada(s) por falta de confirmación.`);
-    } catch (error) {
-      console.error('[Cron Job 2] Error ejecutando cancelador de 12h:', error);
-    }
-  });
+  console.log('[Cron Jobs] Inicializando jobs persistentes de citas...');
+  cron.schedule('0 * * * *', () => { enqueueDueAppointmentReminders().catch(error => console.error(JSON.stringify({ event: 'appointment_reminder_enqueue_failed', error: error instanceof Error ? error.name : 'UnknownError' }))); });
+  cron.schedule('0 * * * *', () => { expirePendingConfirmations(new Date()).catch(error => console.error(JSON.stringify({ event: 'appointment_expiration_failed', error: error instanceof Error ? error.name : 'UnknownError' }))); });
 };

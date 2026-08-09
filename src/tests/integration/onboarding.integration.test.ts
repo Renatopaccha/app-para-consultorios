@@ -17,7 +17,7 @@ describe('onboarding profesional con PostgreSQL real', () => {
     await clearIntegrationDatabase();
     const admin = await prisma.user.create({
       data: {
-        email: 'admin.integration@zenda.test', firstName: 'Admin', lastName: 'Integration',
+        email: 'admin.integration@zenda.test', emailNormalized: 'admin.integration@zenda.test', firstName: 'Admin', lastName: 'Integration',
         passwordHash: await bcrypt.hash('integration-password-123', 10), role: 'SUPER_ADMIN',
       },
     });
@@ -67,7 +67,7 @@ describe('onboarding profesional con PostgreSQL real', () => {
 
   it('acepta concurrentemente una invitación una sola vez y conserva una única asociación', async () => {
     const clinicAdmin = await prisma.user.create({
-      data: { email: 'clinica.integration@zenda.test', firstName: 'Clínica', lastName: 'Anfitriona', passwordHash: 'x', role: 'CLINIC_ADMIN' },
+      data: { email: 'clinica.integration@zenda.test', emailNormalized: 'clinica.integration@zenda.test', firstName: 'Clínica', lastName: 'Anfitriona', passwordHash: 'x', role: 'CLINIC_ADMIN' },
     });
     const clinic = await prisma.clinicProfile.create({ data: { userId: clinicAdmin.id, name: 'Clínica Test', address: 'Calle Test' } });
     const created = await request(app).post('/api/admin/invitations').set(adminHeaders())
@@ -100,7 +100,7 @@ describe('onboarding profesional con PostgreSQL real', () => {
   });
 
   it('revierte la transacción si una restricción real impide crear el perfil médico', async () => {
-    const existingUser = await prisma.user.create({ data: { email: 'licencia-existente@zenda.test', firstName: 'Existente', lastName: 'Doctor', passwordHash: 'x', role: 'DOCTOR' } });
+    const existingUser = await prisma.user.create({ data: { email: 'licencia-existente@zenda.test', emailNormalized: 'licencia-existente@zenda.test', firstName: 'Existente', lastName: 'Doctor', passwordHash: 'x', role: 'DOCTOR' } });
     await prisma.doctorProfile.create({ data: { userId: existingUser.id, licenseNumber: 'DUP-001', consultationPrice: 1 } });
     const invite = await request(app).post('/api/admin/invitations').set(adminHeaders())
       .send({ email: 'fallo-perfil@zenda.test', role: 'DOCTOR' }).expect(201);
@@ -120,7 +120,7 @@ describe('onboarding profesional con PostgreSQL real', () => {
       expect(await prisma.invitation.count({ where: { id: clinicInvite.body.invitation.id, acceptedAt: null } })).toBe(1);
       await prisma.$executeRawUnsafe(`DROP TRIGGER zenda_test_reject_clinic ON "ClinicProfile"`);
 
-      const clinicOwner = await prisma.user.create({ data: { email: 'owner@zenda.test', firstName: 'Owner', lastName: 'Clinic', passwordHash: 'x', role: 'CLINIC_ADMIN' } });
+      const clinicOwner = await prisma.user.create({ data: { email: 'owner@zenda.test', emailNormalized: 'owner@zenda.test', firstName: 'Owner', lastName: 'Clinic', passwordHash: 'x', role: 'CLINIC_ADMIN' } });
       const clinic = await prisma.clinicProfile.create({ data: { userId: clinicOwner.id, name: 'Clinic Owner', address: 'Address' } });
       await prisma.$executeRawUnsafe(`CREATE TRIGGER zenda_test_reject_workplace BEFORE INSERT ON "DoctorClinicWorkplace" FOR EACH ROW EXECUTE FUNCTION zenda_test_reject_insert()`);
       const doctorInvite = await request(app).post('/api/admin/invitations').set(adminHeaders())

@@ -1,7 +1,9 @@
 import { Prisma } from '../../generated/prisma';
 import prisma from '../prisma';
-import { PaymentActor, paymentAppointmentScope } from './cashPaymentAuthorization.service';
+import { assertPaymentFiltersWithinScope, PaymentActor, paymentAppointmentScope } from './cashPaymentAuthorization.service';
 import { cashAmountFromCents } from './cashPaymentCode.service';
+import { localDate, localDateTimeToUtc } from '../utils/scheduling';
+import { BookingError } from './appointmentBooking.service';
 
 const financeInclude = {
   appointment: { include: { patient: { select: { id: true, firstName: true, lastName: true } }, doctorProfile: { include: { user: { select: { firstName: true, lastName: true } } } }, clinicProfile: { select: { id: true, name: true } }, service: { select: { id: true, name: true } } } },
@@ -11,13 +13,24 @@ const financeInclude = {
 type FinancePayment = Prisma.PaymentGetPayload<{ include: typeof financeInclude }>;
 
 async function financeWhere(actor: PaymentActor, query: Record<string, string | undefined>): Promise<Prisma.PaymentWhereInput> {
+  await assertPaymentFiltersWithinScope(actor, query);
   const scope = await paymentAppointmentScope(actor, true);
   const appointmentFilter: Prisma.AppointmentWhereInput = {};
-  if (query.doctorId) appointmentFilter.doctorProfileId = query.doctorId;
+  if (query.doctorId && actor.role !== 'DOCTOR') appointmentFilter.doctorProfileId = query.doctorId;
   if (query.clinicId) appointmentFilter.clinicProfileId = query.clinicId;
-  if (query.startDate || query.endDate) appointmentFilter.startsAt = { ...(query.startDate ? { gte: new Date(`${query.startDate}T00:00:00.000Z`) } : {}), ...(query.endDate ? { lte: new Date(`${query.endDate}T23:59:59.999Z`) } : {}) };
+  if (query.serviceId) appointmentFilter.serviceId = query.serviceId;
+  const from = query.from || query.startDate;
+  const to = query.to || query.endDate;
+  if ((from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (to && !/^\d{4}-\d{2}-\d{2}$/.test(to))) {
+    throw new BookingError('INVALID_DATE_RANGE', 422, 'El rango de fechas no es válido.');
+  }
+  if (from && to && from > to) throw new BookingError('INVALID_DATE_RANGE', 422, 'La fecha inicial no puede ser posterior a la final.');
+  if (from || to) appointmentFilter.startsAt = {
+    ...(from ? { gte: localDateTimeToUtc(from, '00:00') } : {}),
+    ...(to ? { lt: new Date(localDateTimeToUtc(to, '00:00').getTime() + 86_400_000) } : {}),
+  };
   const where: Prisma.PaymentWhereInput = { method: 'CASH', appointment: { AND: [scope, appointmentFilter] } };
-  if (query.status && ['PENDING', 'CONFIRMED', 'CANCELLED', 'REFUNDED', 'EXEMPTED'].includes(query.status)) where.status = query.status as any;
+  if (query.status && ['PENDING', 'CONFIRMED', 'CANCELLED', 'REFUNDED', 'EXEMPTED'].includes(query.status)) where.status = query.status as 'PENDING' | 'CONFIRMED' | 'CANCELLED' | 'REFUNDED' | 'EXEMPTED';
   return where;
 }
 
@@ -43,7 +56,13 @@ export async function getFinanceSummary(actor: PaymentActor, query: Record<strin
   const pending = payments.filter(payment => payment.status === 'PENDING');
   const cancelled = payments.filter(payment => payment.status === 'CANCELLED');
   const metrics = { confirmedCashCents: confirmed.reduce((sum, payment) => sum + payment.amountCents, 0), pendingCashCents: pending.reduce((sum, payment) => sum + payment.amountCents, 0), cancelledCashCents: cancelled.reduce((sum, payment) => sum + payment.amountCents, 0), requiresReviewCents: payments.filter(payment => payment.requiresReview).reduce((sum, payment) => sum + payment.amountCents, 0), confirmedPaymentCount: confirmed.length, pendingPaymentCount: pending.length, averageConfirmedPaymentCents: confirmed.length ? Math.round(confirmed.reduce((sum, payment) => sum + payment.amountCents, 0) / confirmed.length) : 0 };
-  return { label: 'Ingresos registrados', currency: 'USD', metrics, groups: { byDay: grouped(payments, payment => ({ key: payment.appointment.startsAt?.toISOString().slice(0, 10) || 'unknown', label: payment.appointment.startsAt?.toISOString().slice(0, 10) || 'Sin fecha' })), byDoctor: grouped(payments, payment => ({ key: payment.appointment.doctorProfile.id, label: `${payment.appointment.doctorProfile.user.firstName} ${payment.appointment.doctorProfile.user.lastName}`.trim() })), byClinic: grouped(payments, payment => ({ key: payment.appointment.clinicProfile.id, label: payment.appointment.clinicProfile.name })), byService: grouped(payments, payment => ({ key: payment.appointment.service.id, label: payment.appointment.serviceNameSnapshot || payment.appointment.service.name })) } };
+  return { label: 'Ingresos registrados', currency: 'USD', metrics, groups: {
+    byDay: grouped(payments, payment => ({ key: payment.appointment.startsAt ? localDate(payment.appointment.startsAt) : 'unknown', label: payment.appointment.startsAt ? localDate(payment.appointment.startsAt) : 'Sin fecha' })),
+    ...(actor.role === 'DOCTOR' ? {} : { byDoctor: grouped(payments, payment => ({ key: payment.appointment.doctorProfile.id, label: `${payment.appointment.doctorProfile.user.firstName} ${payment.appointment.doctorProfile.user.lastName}`.trim() })) }),
+    byClinic: grouped(payments, payment => ({ key: payment.appointment.clinicProfile.id, label: payment.appointment.clinicProfile.name })),
+    byService: grouped(payments, payment => ({ key: payment.appointment.service.id, label: payment.appointment.serviceNameSnapshot || payment.appointment.service.name })),
+    byStatus: grouped(payments, payment => ({ key: payment.status, label: payment.status === 'CONFIRMED' ? 'Confirmados' : payment.status === 'PENDING' ? 'Pendientes' : payment.status === 'CANCELLED' ? 'Cancelados' : payment.status })),
+  } };
 }
 
 export async function getFinancePayments(actor: PaymentActor, query: Record<string, string | undefined>) {

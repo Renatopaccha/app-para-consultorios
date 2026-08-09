@@ -29,8 +29,8 @@ describe('seed de desarrollo idempotente', () => {
     expect(doctorUser?.role).toBe('DOCTOR');
     expect(await bcrypt.compare(environment.DEV_DOCTOR_PASSWORD!, doctorUser?.passwordHash ?? '')).toBe(true);
     expect(doctorUser?.doctorProfile).toBeTruthy();
-    expect(doctorUser?.doctorProfile?.workplaces).toHaveLength(1);
-    expect(doctorUser?.doctorProfile?.workplaces[0]?.isActive).toBe(true);
+    expect(doctorUser?.doctorProfile?.workplaces).toHaveLength(2);
+    expect(doctorUser?.doctorProfile?.workplaces.every((workplace) => workplace.isActive)).toBe(true);
     expect(doctorUser?.doctorProfile?.services).toHaveLength(2);
     expect(doctorUser?.doctorProfile?.services.every((service) => typeof service.priceCents === 'number' && service.priceCents > 0)).toBe(true);
     expect(await prisma.user.count({ where: { email: environment.DEV_DOCTOR_EMAIL } })).toBe(1);

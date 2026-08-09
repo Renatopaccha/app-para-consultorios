@@ -28,6 +28,11 @@ const prismaMock = prisma as unknown as {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  prismaMock.user.findUnique.mockImplementation(({ where }: { where: { id?: string } }) => {
+    if (where.id === 'patient-1') return Promise.resolve({ id: 'patient-1', role: 'PATIENT' });
+    if (where.id === 'admin-1') return Promise.resolve({ id: 'admin-1', role: 'SUPER_ADMIN' });
+    return Promise.resolve(null);
+  });
 });
 
 describe('invitation HTTP boundary', () => {
@@ -43,7 +48,6 @@ describe('invitation HTTP boundary', () => {
   });
 
   it('allows a super admin to create a doctor invitation without exposing the hash', async () => {
-    prismaMock.user.findUnique.mockResolvedValue(null);
     prismaMock.invitation.findFirst.mockResolvedValue(null);
     prismaMock.invitation.create.mockResolvedValue({ id: 'invite-1', email: 'doctor@example.test', role: 'DOCTOR', clinicProfileId: null, expiresAt: new Date(), createdAt: new Date() });
     const token = generateToken({ id: 'admin-1', role: 'SUPER_ADMIN' });
@@ -58,7 +62,6 @@ describe('invitation HTTP boundary', () => {
   it('never exposes an invitation token in production responses', async () => {
     const originalEnvironment = process.env.NODE_ENV;
     process.env.NODE_ENV = 'production';
-    prismaMock.user.findUnique.mockResolvedValue(null);
     prismaMock.invitation.findFirst.mockResolvedValue(null);
     prismaMock.invitation.create.mockResolvedValue({ id: 'invite-production', email: 'doctor@example.test', role: 'DOCTOR', clinicProfileId: null, expiresAt: new Date(), createdAt: new Date() });
     const token = generateToken({ id: 'admin-1', role: 'SUPER_ADMIN' });

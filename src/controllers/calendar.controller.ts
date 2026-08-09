@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { google } from 'googleapis';
 import prisma from '../prisma';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import { getOutlookConfig, OutlookConfigurationError, outlookOAuthBaseUrl } from '../config/outlook';
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
@@ -120,7 +121,19 @@ export const googleCallback = async (req: Request, res: Response) => {
 // MICROSOFT OUTLOOK CALENDAR OAUTH2
 // -------------------------------------------------------------------------
 
-const OUTLOOK_REDIRECT_URI = 'http://localhost:3000/api/calendar/outlook/callback';
+function outlookConfigurationResponse(error: unknown, res: Response): boolean {
+  if (!(error instanceof OutlookConfigurationError)) return false;
+  console.error(JSON.stringify({ event: 'outlook_configuration_missing', missing: error.missing }));
+  res.status(503).json({ error: 'OUTLOOK_NOT_CONFIGURED', message: 'La sincronización de Outlook no está configurada actualmente.' });
+  return true;
+}
+
+function tokenFields(value: unknown): { accessToken: string; refreshToken: string | null; expiresIn: number } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('INVALID_OUTLOOK_TOKEN_RESPONSE');
+  const data = value as Record<string, unknown>;
+  if (typeof data.access_token !== 'string' || typeof data.expires_in !== 'number') throw new Error('INVALID_OUTLOOK_TOKEN_RESPONSE');
+  return { accessToken: data.access_token, refreshToken: typeof data.refresh_token === 'string' ? data.refresh_token : null, expiresIn: data.expires_in };
+}
 
 export const getOutlookAuthUrl = (req: AuthRequest, res: Response) => {
   try {
@@ -135,6 +148,7 @@ export const getOutlookAuthUrl = (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: 'Tu rol no tiene permitido sincronizar calendarios' });
     }
 
+    const config = getOutlookConfig();
     const statePayload = Buffer.from(JSON.stringify({ userId, role })).toString('base64');
     
     // Scopes requeridos para Outlook
@@ -142,18 +156,19 @@ export const getOutlookAuthUrl = (req: AuthRequest, res: Response) => {
 
     // Para Microsoft se recomienda usar URLSearchParams para armar la URL
     const params = new URLSearchParams({
-      client_id: process.env.OUTLOOK_CLIENT_ID || process.env.AZURE_CLIENT_ID || '',
+      client_id: config.clientId,
       response_type: 'code',
-      redirect_uri: OUTLOOK_REDIRECT_URI,
+      redirect_uri: config.redirectUri,
       response_mode: 'query',
       scope: scopes,
       state: statePayload
     });
 
-    const authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params.toString()}`;
+    const authUrl = `${outlookOAuthBaseUrl(config)}/authorize?${params.toString()}`;
 
     res.status(200).json({ url: authUrl });
   } catch (error) {
+    if (outlookConfigurationResponse(error, res)) return;
     console.error('[Calendar Controller] Error en getOutlookAuthUrl:', error);
     res.status(500).json({ error: 'Error al generar la URL de autenticación de Outlook' });
   }
@@ -161,6 +176,7 @@ export const getOutlookAuthUrl = (req: AuthRequest, res: Response) => {
 
 export const outlookCallback = async (req: Request, res: Response) => {
   try {
+    const config = getOutlookConfig();
     const { code, state, error: outlookError } = req.query;
 
     if (outlookError) {
@@ -183,15 +199,15 @@ export const outlookCallback = async (req: Request, res: Response) => {
 
     // Pedir tokens a Microsoft usando client credentials
     const tokenParams = new URLSearchParams({
-      client_id: process.env.OUTLOOK_CLIENT_ID || process.env.AZURE_CLIENT_ID || '',
-      client_secret: process.env.OUTLOOK_CLIENT_SECRET || '',
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
       code,
-      redirect_uri: OUTLOOK_REDIRECT_URI,
+      redirect_uri: config.redirectUri,
       grant_type: 'authorization_code'
     });
 
     const tokenResponse = await fetch(
-      'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+      `${outlookOAuthBaseUrl(config)}/token`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -200,15 +216,13 @@ export const outlookCallback = async (req: Request, res: Response) => {
     );
 
     if (!tokenResponse.ok) {
-      const errorData = await tokenResponse.json();
-      throw new Error(`Error de Microsoft Token API: ${JSON.stringify(errorData)}`);
+      throw new Error(`OUTLOOK_TOKEN_REQUEST_FAILED_${tokenResponse.status}`);
     }
 
-    const tokenData = await tokenResponse.json();
-    const { access_token, refresh_token, expires_in } = tokenData;
+    const { accessToken, refreshToken, expiresIn } = tokenFields(await tokenResponse.json());
     
     // Calculamos el expiry_date sumando los segundos de expires_in a la hora actual
-    const expiryDate = new Date(Date.now() + expires_in * 1000);
+    const expiryDate = new Date(Date.now() + expiresIn * 1000);
 
     if (role === 'DOCTOR') {
       const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
@@ -217,8 +231,8 @@ export const outlookCallback = async (req: Request, res: Response) => {
       await prisma.doctorProfile.update({
         where: { id: doctor.id },
         data: {
-          outlookAccessToken: access_token,
-          ...(refresh_token && { outlookRefreshToken: refresh_token }),
+          outlookAccessToken: accessToken,
+          ...(refreshToken && { outlookRefreshToken: refreshToken }),
           outlookTokenExpiry: expiryDate
         }
       });
@@ -229,8 +243,8 @@ export const outlookCallback = async (req: Request, res: Response) => {
       await prisma.clinicProfile.update({
         where: { id: clinic.id },
         data: {
-          outlookAccessToken: access_token,
-          ...(refresh_token && { outlookRefreshToken: refresh_token }),
+          outlookAccessToken: accessToken,
+          ...(refreshToken && { outlookRefreshToken: refreshToken }),
           outlookTokenExpiry: expiryDate
         }
       });
@@ -239,8 +253,9 @@ export const outlookCallback = async (req: Request, res: Response) => {
     }
 
     res.status(200).json({ message: 'Calendario de Outlook sincronizado exitosamente. Ya puedes cerrar esta ventana.' });
-  } catch (error: any) {
-    console.error('[Calendar Controller] Error en outlookCallback:', error);
+  } catch (error: unknown) {
+    if (outlookConfigurationResponse(error, res)) return;
+    console.error('[Calendar Controller] Error en outlookCallback:', error instanceof Error ? error.name : 'UnknownError');
     res.status(500).json({ error: 'Error al procesar la respuesta de Microsoft' });
   }
 };

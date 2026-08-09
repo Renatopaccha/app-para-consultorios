@@ -28,7 +28,7 @@ describe('GET /api/auth/me', () => {
   it('requires a valid JWT and returns only the authenticated session DTO', async () => {
     prismaMock.user.findUnique.mockResolvedValue({
       id: 'doctor-user', email: 'doctor@example.test', firstName: 'Ada', lastName: 'Doctor', phone: null, role: 'DOCTOR',
-      doctorProfile: { id: 'doctor-profile' }, clinicProfile: null, assistantProfile: null,
+      doctorProfile: { id: 'doctor-profile', profileImageUrl: null, professionCode: null, displayTitle: null, customDisplayTitle: null, specialties: [] }, clinicProfile: null, assistantProfile: null,
     });
     const token = generateToken({ id: 'doctor-user', role: 'DOCTOR' });
 
@@ -37,7 +37,11 @@ describe('GET /api/auth/me', () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       id: 'doctor-user', email: 'doctor@example.test', firstName: 'Ada', lastName: 'Doctor', phone: null, role: 'DOCTOR',
-      profile: { doctorProfileId: 'doctor-profile' },
+      profile: {
+        doctorProfileId: 'doctor-profile', profileImageUrl: null, profileImageAvatarUrl: null,
+        professionCode: null, displayTitle: null, customDisplayTitle: null,
+        publicDisplayName: 'Ada Doctor', primarySpecialtyName: null,
+      },
     });
     expect(response.body).not.toHaveProperty('passwordHash');
   });

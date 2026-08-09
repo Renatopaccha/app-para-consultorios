@@ -21,12 +21,8 @@ import scheduleBlockRoutes from './routes/scheduleBlock.routes';
 import turnRoutes from './routes/turn.routes';
 import cashPaymentRoutes from './routes/cashPayment.routes';
 import financeRoutes from './routes/finance.routes';
-
-// Tareas programadas (Cron Jobs). They are not part of HTTP integration tests
-// and keeping them out prevents test processes from retaining cron handles.
-if (process.env.NODE_ENV !== 'test') {
-  require('./jobs/reminder.job');
-}
+import notificationRoutes from './routes/notification.routes';
+import { clerkSessionMiddleware } from './services/clerkSession.service';
 
 // Cargar variables de entorno. Tests never load development configuration.
 if (process.env.NODE_ENV === 'test') {
@@ -45,6 +41,9 @@ const allowedOrigins = (process.env.CORS_ORIGIN || '')
 app.use(helmet());
 app.use(cors({ origin: allowedOrigins.length > 0 ? allowedOrigins : false }));
 app.use(express.json({ limit: '1mb' }));
+// Optional while legacy JWT and Clerk coexist. When Clerk is configured, this
+// verifies its session before Zenda maps it to the internal UUID.
+app.use(clerkSessionMiddleware());
 
 // Rutas de prueba
 app.get('/', (req: Request, res: Response) => {
@@ -70,6 +69,7 @@ app.use('/api/schedule-blocks', scheduleBlockRoutes);
 app.use('/api/turns', turnRoutes);
 app.use('/api/cash-payments', cashPaymentRoutes);
 app.use('/api/finance', financeRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   console.error('[API] Unhandled request error:', error instanceof Error ? error.message : error);

@@ -1,5 +1,20 @@
 export interface CatalogItemDto { id: string; name: string; }
 
+export type DoctorWorkspaceMode = 'INDEPENDENT' | 'CLINIC';
+export type DoctorWorkspaceLocationType = 'INDEPENDENT_OFFICE' | 'CLINIC';
+
+export interface DoctorWorkspaceDto {
+  doctorProfileId: string;
+  mode: DoctorWorkspaceMode;
+  selectedClinicId: string | null;
+  locations: Array<{
+    id: string;
+    name: string;
+    type: DoctorWorkspaceLocationType;
+    isActive: true;
+  }>;
+}
+
 export interface DoctorProfileDto {
   id: string;
   firstName: string;
@@ -10,6 +25,12 @@ export interface DoctorProfileDto {
   bio: string | null;
   languages: string[];
   profileImageUrl: string | null;
+  profileImageUrls: { original: string; avatar: string; profile: string } | null;
+  professionCode: 'MEDICINE' | 'DENTISTRY' | 'PSYCHOLOGY' | 'NURSING' | 'OTHER' | null;
+  displayTitle: 'DR' | 'DRA' | 'DENTIST_MALE' | 'DENTIST_FEMALE' | 'PSYCHOLOGIST_MALE' | 'PSYCHOLOGIST_FEMALE' | 'LICENSED_MALE' | 'LICENSED_FEMALE' | 'OTHER' | null;
+  customDisplayTitle: string | null;
+  publicDisplayName: string;
+  primarySpecialtyName: string | null;
   specialties: CatalogItemDto[];
   insurances: CatalogItemDto[];
   availableSpecialties: CatalogItemDto[];
@@ -24,6 +45,9 @@ export interface UpdateDoctorProfileInput {
   languages?: string[];
   specialtyIds?: string[];
   insuranceIds?: string[];
+  professionCode?: 'MEDICINE' | 'DENTISTRY' | 'PSYCHOLOGY' | 'NURSING' | 'OTHER' | null;
+  displayTitle?: 'DR' | 'DRA' | 'DENTIST_MALE' | 'DENTIST_FEMALE' | 'PSYCHOLOGIST_MALE' | 'PSYCHOLOGIST_FEMALE' | 'LICENSED_MALE' | 'LICENSED_FEMALE' | 'OTHER' | null;
+  customDisplayTitle?: string | null;
 }
 
 export interface DoctorServiceDto {

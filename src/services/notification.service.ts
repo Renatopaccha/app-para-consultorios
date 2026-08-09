@@ -12,8 +12,8 @@ if (!getApps().length) {
       credential: cert(serviceAccount)
     });
     console.log('[NotificationService] Firebase Admin inicializado correctamente con firebase-admin.json');
-  } catch (error: any) {
-    if (error.code === 'MODULE_NOT_FOUND') {
+  } catch (error: unknown) {
+    if (error instanceof Error && 'code' in error && error.code === 'MODULE_NOT_FOUND') {
       console.warn('[NotificationService] ADVERTENCIA: El archivo src/config/firebase-admin.json no fue encontrado. Las notificaciones Push no funcionarán.');
     } else {
       console.error('[NotificationService] Error inicializando Firebase Admin:', error);
@@ -39,18 +39,19 @@ export const notificationService = {
    * @param subject Asunto del correo
    * @param html Contenido HTML
    */
-  async sendEmail(to: string, subject: string, html: string) {
+  async sendEmail(to: string, subject: string, html: string, deliveryKey?: string) {
     try {
       const info = await transporter.sendMail({
         from: `"Vitali 🏥" <${process.env.SMTP_USER}>`,
         to,
         subject,
         html,
+        ...(deliveryKey ? { messageId: `<${deliveryKey}@notifications.zenda.local>` } : {}),
       });
-      console.log(`[NotificationService] Email enviado exitosamente a ${to}. MessageId: ${info.messageId}`);
+      console.log(JSON.stringify({ event: 'notification_channel_sent', channel: 'EMAIL', messageId: info.messageId }));
       return true;
     } catch (error) {
-      console.error(`[NotificationService] Error enviando email a ${to}:`, error);
+      console.error(JSON.stringify({ event: 'notification_channel_failed', channel: 'EMAIL', error: error instanceof Error ? error.name : 'UnknownError' }));
       return false; // Evitamos romper el flujo principal si el correo falla
     }
   },

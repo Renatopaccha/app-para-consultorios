@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
-import { register, login, forgotPassword, resetPassword, me, verifyEmail } from '../controllers/auth.controller';
+import { register, login, forgotPassword, resetPassword, me, verifyEmail, linkExistingClerkAccount, resolvePortal } from '../controllers/auth.controller';
 import { acceptInvitation, validateInvitation } from '../controllers/invitation.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 
@@ -19,6 +19,8 @@ const authLimiter = rateLimit({
 router.post('/register', register);
 router.post('/login', authLimiter, login);
 router.get('/me', authenticate, me);
+router.post('/resolve-portal', authenticate, resolvePortal);
+router.post('/clerk/link-existing-account', authLimiter, linkExistingClerkAccount);
 router.post('/verify-email', authLimiter, verifyEmail);
 
 // Rutas de Recuperación de Contraseña

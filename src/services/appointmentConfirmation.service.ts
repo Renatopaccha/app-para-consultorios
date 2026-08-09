@@ -1,6 +1,7 @@
 import prisma from '../prisma';
 import { BookingError } from './appointmentBooking.service';
 import { cancelCashPaymentForAppointment } from './cashPayment.service';
+import { enqueueNotification } from './notificationOutbox.service';
 
 export function confirmationDeadline(startsAt: Date): Date {
   const cutoff = Number(process.env.APPOINTMENT_CONFIRMATION_CUTOFF_HOURS || 12) * 3600_000;
@@ -29,6 +30,7 @@ export async function expirePendingConfirmations(now = new Date()): Promise<numb
       if (updated.count !== 1) return false;
       await tx.appointmentChangeLog.create({ data: { appointmentId: appointment.id, changedByUserId: 'system', changeType: 'CANCELLED', previousStartsAt: appointment.startsAt, previousEndsAt: appointment.endsAt, newStartsAt: appointment.startsAt, newEndsAt: appointment.endsAt, previousStatus: appointment.status, newStatus: 'CANCELLED', reason: 'PATIENT_CONFIRMATION_EXPIRED' } });
       await cancelCashPaymentForAppointment(tx, appointment.id, null, appointment.clinicProfileId, 'PATIENT_CONFIRMATION_EXPIRED');
+      await enqueueNotification(tx, { eventType: 'APPOINTMENT_CANCELLED', aggregateId: appointment.id, deduplicationKey: `appointment:${appointment.id}:confirmation-expired`, payload: { previousStartsAt: appointment.startsAt?.toISOString() } });
       return true;
     });
     if (changed) count++;

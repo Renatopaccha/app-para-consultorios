@@ -1,5 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../utils/jwt';
+import prisma from '../prisma';
+import { resolveClerkSession } from '../services/clerkSession.service';
+import { getClerkMfaStatus, requiresMfa } from '../services/clerkMfa.service';
 export type Role = 'SUPER_ADMIN' | 'CLINIC_ADMIN' | 'DOCTOR' | 'ASSISTANT' | 'PATIENT';
 
 export interface AuthRequest extends Request {
@@ -7,29 +10,78 @@ export interface AuthRequest extends Request {
     id: string;
     role: Role;
   };
+  authSource?: 'legacy_jwt' | 'clerk';
 }
+
+type ZendaPrincipal = { id: string; role: Role };
+
+const bearerToken = (req: Request) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  return authHeader.slice('Bearer '.length).trim() || null;
+};
+
+const zendaUserById = async (id: string): Promise<ZendaPrincipal | null> => {
+  const user = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true } });
+  return user ? { id: user.id, role: user.role as Role } : null;
+};
+
+const zendaUserByClerkId = async (clerkUserId: string): Promise<ZendaPrincipal | null> => {
+  const user = await prisma.user.findUnique({ where: { clerkUserId }, select: { id: true, role: true } });
+  return user ? { id: user.id, role: user.role as Role } : null;
+};
 
 /**
  * Middleware para validar el JWT y añadir el payload del usuario a la request.
  */
-export const authenticate = (req: AuthRequest, res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Falta proveer un token o el formato es inválido' });
-  }
-
-  const token = authHeader.split(' ')[1];
-  if (!token) {
-    return res.status(401).json({ error: 'Token no encontrado en el header' });
-  }
-
+export const authenticate = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  const token = bearerToken(req);
+  const legacyPayload = token ? verifyToken(token) as { id?: string } | null : null;
   try {
-    const decoded = verifyToken(token) as { id: string; role: Role } | null;
-    if (!decoded || !decoded.id) {
-      return res.status(401).json({ error: 'Token inválido o expirado' });
+    const [legacyUser, clerkSession] = await Promise.all([
+      legacyPayload?.id ? zendaUserById(legacyPayload.id) : Promise.resolve(null),
+      Promise.resolve(resolveClerkSession(req)),
+    ]);
+    const clerkUser = clerkSession ? await zendaUserByClerkId(clerkSession.clerkUserId) : null;
+
+    if (legacyPayload?.id && !legacyUser) {
+      return res.status(401).json({ error: 'Sesión no válida', code: 'LEGACY_IDENTITY_NOT_FOUND' });
     }
-    req.user = decoded;
-    next();
+    if (clerkSession && !clerkUser) {
+      return res.status(403).json({ error: 'La identidad Clerk aún no está vinculada a Zenda.', code: 'CLERK_IDENTITY_NOT_LINKED' });
+    }
+    if (legacyUser && clerkUser && legacyUser.id !== clerkUser.id) {
+      return res.status(401).json({ error: 'Las identidades autenticadas no corresponden al mismo usuario.', code: 'AUTH_IDENTITY_CONFLICT' });
+    }
+
+    const user = clerkUser ?? legacyUser;
+    if (!user) return res.status(401).json({ error: 'Token inválido o expirado' });
+
+    // MFA enforcement belongs at the provider-to-Zenda principal boundary. JWT
+    // remains deliberately exempt during coexistence; its legacy flow is not
+    // being migrated in this phase.
+    if (clerkUser && clerkSession && requiresMfa(user.role)) {
+      try {
+        const mfa = await getClerkMfaStatus(clerkSession.clerkUserId);
+        if (!mfa.enabled) {
+          return res.status(403).json({
+            code: 'MFA_SETUP_REQUIRED',
+            message: 'Debes activar la autenticación en dos pasos para acceder con Clerk.',
+            mfa: { required: true, enabled: false },
+          });
+        }
+      } catch {
+        // Professional access fails closed when Clerk cannot confirm MFA.
+        return res.status(503).json({
+          code: 'MFA_STATUS_UNAVAILABLE',
+          message: 'No se pudo verificar el estado de seguridad de tu cuenta. Intenta nuevamente.',
+          mfa: { required: true },
+        });
+      }
+    }
+    req.user = user;
+    req.authSource = clerkUser ? 'clerk' : 'legacy_jwt';
+    return next();
   } catch (error) {
     return res.status(401).json({ error: 'Token inválido o expirado' });
   }

@@ -3,7 +3,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
 import { centsToDollars, dollarsToCents } from '../utils/money';
 import { buildServiceSnapshot } from '../services/serviceSnapshot.service';
-import { emailService } from '../services/email.service';
+import { normalizeEmail } from '../services/emailIdentity.service';
 import bcrypt from 'bcrypt';
 import { createAppointment } from '../services/appointmentBooking.service';
 
@@ -43,7 +43,8 @@ export const getDoctors = async (req: Request, res: Response) => {
           }
         },
         specialties: { select: { id: true, name: true } },
-        services: { select: { id: true, name: true, description: true, price: true, priceCents: true, currency: true, duration: true } }
+        services: { select: { id: true, name: true, description: true, price: true, priceCents: true, currency: true, duration: true } },
+        certifications: { where: { status: 'APPROVED', deletedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }] }, select: { id: true, title: true, institution: true, issuedAt: true, expiresAt: true, status: true } }
       }
     });
     res.json(doctors);
@@ -78,7 +79,8 @@ export const getDoctorById = async (req: Request, res: Response) => {
           }
         },
         specialties: { select: { id: true, name: true } },
-        services: { select: { id: true, name: true, description: true, price: true, priceCents: true, currency: true, duration: true } }
+        services: { select: { id: true, name: true, description: true, price: true, priceCents: true, currency: true, duration: true } },
+        certifications: { where: { status: 'APPROVED', deletedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }] }, select: { id: true, title: true, institution: true, issuedAt: true, expiresAt: true, status: true } }
       }
     });
     if (!doctor) {
@@ -275,30 +277,7 @@ export const addService = async (req: AuthRequest, res: Response) => {
 };
 
 export const addCertification = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.user?.id;
-    if (!userId) return res.status(401).json({ error: 'No autorizado' });
-
-    const doctor = await prisma.doctorProfile.findUnique({ where: { userId } });
-    if (!doctor) return res.status(404).json({ error: 'Perfil no encontrado' });
-
-    const { name, institution, year } = req.body;
-    if (!name || !institution) return res.status(400).json({ error: 'Faltan campos requeridos (name, institution)' });
-
-    const certification = await prisma.certification.create({
-      data: {
-        name,
-        institution,
-        year: year ? parseInt(year) : null,
-        doctorProfileId: doctor.id
-      }
-    });
-
-    res.status(201).json(certification);
-  } catch (error) {
-    console.error('[Doctor Controller] Error en addCertification:', error);
-    res.status(500).json({ error: 'Error al añadir la certificación' });
-  }
+  return res.status(410).json({ error: 'CERTIFICATION_ROUTE_RETIRED', message: 'Utiliza /api/doctors/me/certifications con un documento privado.' });
 };
 
 export const addWorkSchedule = async (req: AuthRequest, res: Response) => {
@@ -403,11 +382,13 @@ export const addAppointment = async (req: AuthRequest, res: Response) => {
 
     if (type === 'bloqueo' || type === 'personal') {
       // Create or find dummy patient for blocks
-      let dummyPatient = await prisma.user.findUnique({ where: { email: 'block@vitali.com' } });
+      const dummyEmail = normalizeEmail('block@vitali.com');
+      let dummyPatient = await prisma.user.findUnique({ where: { emailNormalized: dummyEmail } });
       if (!dummyPatient) {
         dummyPatient = await prisma.user.create({
           data: {
             email: 'block@vitali.com',
+            emailNormalized: dummyEmail,
             passwordHash: 'dummy',
             firstName: 'Bloqueo',
             lastName: 'Sistema',
@@ -456,34 +437,6 @@ export const addAppointment = async (req: AuthRequest, res: Response) => {
     }
 
     const appointment = await createAppointment({ patientUserId: finalPatientId, doctorId: doctor.id, clinicId, serviceId: finalServiceId, requestedStart: `${date}T${startTime}`, paymentMethod: 'NONE' });
-
-    if (type === 'cita') {
-      try {
-        const patientData = await prisma.user.findUnique({
-          where: { id: finalPatientId },
-          select: { email: true, firstName: true }
-        });
-        
-        const clinicData = await prisma.clinicProfile.findUnique({
-          where: { id: clinicId },
-          select: { name: true }
-        });
-
-        if (patientData && patientData.email && clinicData) {
-          const formattedDate = new Date(date).toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-          emailService.sendDoctorAppointmentConfirmation({
-            to: patientData.email,
-            patientName: patientData.firstName,
-            date: formattedDate,
-            time: startTime,
-            doctorName: doctor.user.firstName + ' ' + doctor.user.lastName,
-            clinicName: clinicData.name
-          }).catch(err => console.error("Error async email", err));
-        }
-      } catch (emailError) {
-        console.error("Error intentando enviar correo:", emailError);
-      }
-    }
 
     res.status(201).json(appointment);
   } catch (error) {

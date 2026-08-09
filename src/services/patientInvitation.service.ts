@@ -12,9 +12,11 @@ export async function resolvePatientInvitation(tx: Prisma.TransactionClient, inp
   const firstName = input.firstName.trim();
   const lastName = input.lastName.trim();
   if (!firstName || !lastName) throw new BookingError('INVALID_PATIENT', 400, 'Nombre y apellido del paciente son obligatorios.');
+  const phone = input.phone?.trim() || null;
+  if (phone && (phone.length < 5 || phone.length > 30)) throw new BookingError('INVALID_PATIENT_PHONE', 400, 'El teléfono del paciente no es válido.');
 
-  const existingUser = await tx.user.findFirst({
-    where: { OR: [{ emailNormalized }, { email: emailNormalized }] },
+  const existingUser = await tx.user.findUnique({
+    where: { emailNormalized },
     select: { id: true, email: true, firstName: true, lastName: true, phone: true, role: true },
   });
   if (existingUser) {
@@ -41,7 +43,7 @@ export async function resolvePatientInvitation(tx: Prisma.TransactionClient, inp
         emailNormalized,
         firstName,
         lastName,
-        phone: input.phone?.trim() || null,
+        phone,
         tokenHash: hashOpaqueToken(token),
         expiresAt: new Date(now.getTime() + PATIENT_INVITATION_TTL_MS),
         invitedByUserId: input.invitedByUserId,

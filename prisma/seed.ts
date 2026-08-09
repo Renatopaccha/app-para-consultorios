@@ -1,5 +1,6 @@
 import bcrypt from 'bcrypt';
 import prisma from '../src/prisma';
+import { normalizeEmail } from '../src/services/emailIdentity.service';
 
 type DevelopmentSeedConfig = {
   superAdminEmail: string;
@@ -19,11 +20,11 @@ const required = (name: string, value: string | undefined): string => {
 
 function getDevelopmentSeedConfig(env: NodeJS.ProcessEnv): DevelopmentSeedConfig {
   return {
-    superAdminEmail: required('DEV_SUPER_ADMIN_EMAIL', env.DEV_SUPER_ADMIN_EMAIL).toLowerCase(),
+    superAdminEmail: normalizeEmail(required('DEV_SUPER_ADMIN_EMAIL', env.DEV_SUPER_ADMIN_EMAIL)),
     superAdminPassword: required('DEV_SUPER_ADMIN_PASSWORD', env.DEV_SUPER_ADMIN_PASSWORD),
-    clinicAdminEmail: required('DEV_CLINIC_ADMIN_EMAIL', env.DEV_CLINIC_ADMIN_EMAIL).toLowerCase(),
+    clinicAdminEmail: normalizeEmail(required('DEV_CLINIC_ADMIN_EMAIL', env.DEV_CLINIC_ADMIN_EMAIL)),
     clinicAdminPassword: required('DEV_CLINIC_ADMIN_PASSWORD', env.DEV_CLINIC_ADMIN_PASSWORD),
-    doctorEmail: required('DEV_DOCTOR_EMAIL', env.DEV_DOCTOR_EMAIL).toLowerCase(),
+    doctorEmail: normalizeEmail(required('DEV_DOCTOR_EMAIL', env.DEV_DOCTOR_EMAIL)),
     doctorPassword: required('DEV_DOCTOR_PASSWORD', env.DEV_DOCTOR_PASSWORD),
     doctorLicenseNumber: required('DEV_DOCTOR_LICENSE_NUMBER', env.DEV_DOCTOR_LICENSE_NUMBER),
   };
@@ -57,14 +58,14 @@ export async function seedDevelopmentData(env: NodeJS.ProcessEnv = process.env) 
   const { specialties, insurances } = await ensureCatalogs();
 
   const superAdmin = await prisma.user.upsert({
-    where: { email: config.superAdminEmail },
-    update: { passwordHash: superAdminHash, role: 'SUPER_ADMIN' },
-    create: { email: config.superAdminEmail, passwordHash: superAdminHash, firstName: 'Admin', lastName: 'Desarrollo', role: 'SUPER_ADMIN' },
+    where: { emailNormalized: config.superAdminEmail },
+    update: { emailNormalized: config.superAdminEmail, passwordHash: superAdminHash, role: 'SUPER_ADMIN' },
+    create: { email: config.superAdminEmail, emailNormalized: config.superAdminEmail, passwordHash: superAdminHash, firstName: 'Admin', lastName: 'Desarrollo', role: 'SUPER_ADMIN' },
   });
   const clinicAdmin = await prisma.user.upsert({
-    where: { email: config.clinicAdminEmail },
-    update: { passwordHash: clinicAdminHash, role: 'CLINIC_ADMIN' },
-    create: { email: config.clinicAdminEmail, passwordHash: clinicAdminHash, firstName: 'Clínica', lastName: 'Desarrollo', role: 'CLINIC_ADMIN' },
+    where: { emailNormalized: config.clinicAdminEmail },
+    update: { emailNormalized: config.clinicAdminEmail, passwordHash: clinicAdminHash, role: 'CLINIC_ADMIN' },
+    create: { email: config.clinicAdminEmail, emailNormalized: config.clinicAdminEmail, passwordHash: clinicAdminHash, firstName: 'Clínica', lastName: 'Desarrollo', role: 'CLINIC_ADMIN' },
   });
   const clinic = await prisma.clinicProfile.upsert({
     where: { userId: clinicAdmin.id },
@@ -72,16 +73,22 @@ export async function seedDevelopmentData(env: NodeJS.ProcessEnv = process.env) 
     create: { userId: clinicAdmin.id, name: 'Clínica Zenda Desarrollo', address: 'Dirección de desarrollo', verificationStatus: 'APPROVED', verifiedAt: new Date(), specialties: { connect: specialties.map(({ id }) => ({ id })) }, insurances: { connect: insurances.map(({ id }) => ({ id })) } },
   });
   const doctorUser = await prisma.user.upsert({
-    where: { email: config.doctorEmail },
-    update: { passwordHash: doctorHash, role: 'DOCTOR' },
-    create: { email: config.doctorEmail, passwordHash: doctorHash, firstName: 'Doctor', lastName: 'Desarrollo', role: 'DOCTOR' },
+    where: { emailNormalized: config.doctorEmail },
+    update: { email: config.doctorEmail, emailNormalized: config.doctorEmail, passwordHash: doctorHash, role: 'DOCTOR' },
+    create: { email: config.doctorEmail, emailNormalized: config.doctorEmail, passwordHash: doctorHash, firstName: 'Doctor', lastName: 'Desarrollo', role: 'DOCTOR' },
   });
   const doctor = await prisma.doctorProfile.upsert({
     where: { userId: doctorUser.id },
-    update: { licenseNumber: config.doctorLicenseNumber, consultationPrice: 45, isVerified: true, verificationStatus: 'APPROVED', verifiedAt: new Date(), bio: 'Perfil médico creado exclusivamente para desarrollo.', languages: ['Español'], specialties: { set: specialties.map(({ id }) => ({ id })) }, insurances: { set: insurances.map(({ id }) => ({ id })) } },
-    create: { userId: doctorUser.id, licenseNumber: config.doctorLicenseNumber, consultationPrice: 45, isVerified: true, verificationStatus: 'APPROVED', verifiedAt: new Date(), bio: 'Perfil médico creado exclusivamente para desarrollo.', languages: ['Español'], specialties: { connect: specialties.map(({ id }) => ({ id })) }, insurances: { connect: insurances.map(({ id }) => ({ id })) } },
+    update: { licenseNumber: config.doctorLicenseNumber, consultationPrice: 45, isVerified: true, verificationStatus: 'APPROVED', verifiedAt: new Date(), isIndependent: true, professionCode: 'MEDICINE', displayTitle: 'DR', customDisplayTitle: null, bio: 'Perfil médico creado exclusivamente para desarrollo.', languages: ['Español'], specialties: { set: specialties.map(({ id }) => ({ id })) }, insurances: { set: insurances.map(({ id }) => ({ id })) } },
+    create: { userId: doctorUser.id, licenseNumber: config.doctorLicenseNumber, consultationPrice: 45, isVerified: true, verificationStatus: 'APPROVED', verifiedAt: new Date(), isIndependent: true, professionCode: 'MEDICINE', displayTitle: 'DR', bio: 'Perfil médico creado exclusivamente para desarrollo.', languages: ['Español'], specialties: { connect: specialties.map(({ id }) => ({ id })) }, insurances: { connect: insurances.map(({ id }) => ({ id })) } },
+  });
+  const independentOffice = await prisma.clinicProfile.upsert({
+    where: { userId: doctorUser.id },
+    update: { name: 'Consultorio privado', address: 'Dirección por configurar', type: 'INDEPENDENT_PRACTICE', verificationStatus: 'APPROVED', verifiedAt: new Date() },
+    create: { userId: doctorUser.id, name: 'Consultorio privado', address: 'Dirección por configurar', type: 'INDEPENDENT_PRACTICE', verificationStatus: 'APPROVED', verifiedAt: new Date() },
   });
   await prisma.doctorClinicWorkplace.upsert({ where: { doctorProfileId_clinicProfileId: { doctorProfileId: doctor.id, clinicProfileId: clinic.id } }, update: { isActive: true, leftAt: null }, create: { doctorProfileId: doctor.id, clinicProfileId: clinic.id, isActive: true } });
+  await prisma.doctorClinicWorkplace.upsert({ where: { doctorProfileId_clinicProfileId: { doctorProfileId: doctor.id, clinicProfileId: independentOffice.id } }, update: { isActive: true, leftAt: null }, create: { doctorProfileId: doctor.id, clinicProfileId: independentOffice.id, isActive: true } });
 
   const serviceDefinitions = [
     { name: 'Consulta de desarrollo', description: 'Servicio de prueba para validar el panel médico.', priceCents: 4500, duration: 30 },
