@@ -1,6 +1,7 @@
 import crypto from 'crypto';
-import { v2 as cloudinary, type UploadApiOptions, type UploadApiResponse } from 'cloudinary';
+import type { UploadApiOptions, UploadApiResponse } from 'cloudinary';
 import { ImageValidationError, inspectImage } from './image.service';
+import { configuredCloudinary } from '../config/cloudinary';
 
 export const CERTIFICATION_MAX_BYTES = 8 * 1024 * 1024;
 const MAX_PDF_PAGES = 50;
@@ -24,7 +25,7 @@ export function setCertificationUploadAdapterForTests(adapter?: UploadAdapter) {
 
 function cloudinaryUpload(buffer: Buffer, options: UploadApiOptions): Promise<UploadApiResponse> {
   return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
+    const stream = configuredCloudinary().uploader.upload_stream(options, (error, result) => {
       if (error) return reject(error);
       if (!result) return reject(new Error('Cloudinary no retornó un resultado válido.'));
       resolve(result);
@@ -76,7 +77,7 @@ export async function uploadCertificationDocument(buffer: Buffer, declaredMime: 
 }
 
 export function temporaryCertificationDocumentUrl(publicId: string, format: string, mimeType: string): string {
-  return cloudinary.utils.private_download_url(publicId, format, {
+  return configuredCloudinary().utils.private_download_url(publicId, format, {
     resource_type: mimeType === 'application/pdf' ? 'raw' : 'image',
     type: 'authenticated',
     expires_at: Math.floor(Date.now() / 1000) + 300,
@@ -86,5 +87,5 @@ export function temporaryCertificationDocumentUrl(publicId: string, format: stri
 
 export async function deleteCertificationDocument(publicId: string, mimeType: string): Promise<void> {
   if (testUploadAdapter) return;
-  await cloudinary.uploader.destroy(publicId, { type: 'authenticated', resource_type: mimeType === 'application/pdf' ? 'raw' : 'image', invalidate: true });
+  await configuredCloudinary().uploader.destroy(publicId, { type: 'authenticated', resource_type: mimeType === 'application/pdf' ? 'raw' : 'image', invalidate: true });
 }

@@ -1,11 +1,6 @@
 import crypto from 'crypto';
-import { v2 as cloudinary, type UploadApiOptions, type UploadApiResponse } from 'cloudinary';
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+import type { UploadApiOptions, UploadApiResponse } from 'cloudinary';
+import { configuredCloudinary } from '../config/cloudinary';
 
 export type SupportedImageMime = 'image/jpeg' | 'image/png' | 'image/webp';
 export type InspectedImage = { mime: SupportedImageMime; width: number; height: number };
@@ -90,7 +85,7 @@ export function setProfileImageUploadAdapterForTests(adapter?: ProfileUploadAdap
 
 function upload(buffer: Buffer, options: UploadApiOptions): Promise<UploadApiResponse> {
   return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(options, (error, result) => {
+    const stream = configuredCloudinary().uploader.upload_stream(options, (error, result) => {
       if (error) return reject(error);
       if (!result) return reject(new Error('Cloudinary no retornó un resultado válido.'));
       resolve(result);
@@ -121,6 +116,6 @@ export const imageService = {
   },
   deleteReplacedProfileImage: async (previousUrl: string | null, currentPublicId: string): Promise<void> => {
     const previousPublicId = publicIdFromUrl(previousUrl);
-    if (previousPublicId && previousPublicId !== currentPublicId) await cloudinary.uploader.destroy(previousPublicId, { invalidate: true, resource_type: 'image' });
+    if (previousPublicId && previousPublicId !== currentPublicId) await configuredCloudinary().uploader.destroy(previousPublicId, { invalidate: true, resource_type: 'image' });
   },
 };

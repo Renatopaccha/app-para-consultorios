@@ -12,6 +12,12 @@
     "db:test:down": "docker compose -f docker-compose.test.yml down -v",
     "db:test:migrate": "NODE_ENV=test prisma migrate deploy --config prisma/test.config.ts",
     "db:test:backfill-money": "NODE_ENV=test ts-node prisma/backfill-service-money.ts",
+    "catalog:professional": "ts-node scripts/professionalCatalog.ts plan",
+    "catalog:professional:plan": "ts-node scripts/professionalCatalog.ts plan",
+    "catalog:professional:apply": "ts-node scripts/professionalCatalog.ts apply",
+    "professional-access:backfill": "ts-node scripts/professionalAccessBackfill.ts plan",
+    "professional-access:backfill:plan": "ts-node scripts/professionalAccessBackfill.ts plan",
+    "professional-access:backfill:apply": "ts-node scripts/professionalAccessBackfill.ts apply",
     "test:unit": "jest --config jest.config.js --runInBand",
     "test:integration": "NODE_ENV=test jest --config jest.integration.config.js --runInBand",
     "test:all": "npm run test:unit && npm run test:integration"

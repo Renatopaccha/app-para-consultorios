@@ -3,6 +3,7 @@ import { verifyToken } from '../utils/jwt';
 import prisma from '../prisma';
 import { resolveClerkSession } from '../services/clerkSession.service';
 import { getClerkMfaStatus, requiresMfa } from '../services/clerkMfa.service';
+import { authorizeProfessionalRequest } from '../services/professionalAuthorizationEnforcement.service';
 export type Role = 'SUPER_ADMIN' | 'CLINIC_ADMIN' | 'DOCTOR' | 'ASSISTANT' | 'PATIENT';
 
 export interface AuthRequest extends Request {
@@ -55,7 +56,10 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     }
 
     const user = clerkUser ?? legacyUser;
-    if (!user) return res.status(401).json({ error: 'Token inválido o expirado' });
+    if (!user) {
+      const code = token ? 'AUTH_TOKEN_INVALID_OR_EXPIRED' : 'AUTH_CREDENTIALS_MISSING';
+      return res.status(401).json({ error: 'Token inválido o expirado', code });
+    }
 
     // MFA enforcement belongs at the provider-to-Zenda principal boundary. JWT
     // remains deliberately exempt during coexistence; its legacy flow is not
@@ -83,7 +87,8 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     req.authSource = clerkUser ? 'clerk' : 'legacy_jwt';
     return next();
   } catch (error) {
-    return res.status(401).json({ error: 'Token inválido o expirado' });
+    console.error('[Auth] No se pudo resolver la identidad autenticada:', error instanceof Error ? error.message : 'unknown error');
+    return res.status(503).json({ error: 'No se pudo validar la sesión en este momento.', code: 'AUTHENTICATION_UNAVAILABLE' });
   }
 };
 
@@ -92,7 +97,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
  * @param roles Array de roles permitidos para acceder al endpoint.
  */
 export const requireRole = (roles: Role[]) => {
-  return (req: AuthRequest, res: Response, next: NextFunction) => {
+  return async (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Usuario no autenticado' });
     }
@@ -103,6 +108,44 @@ export const requireRole = (roles: Role[]) => {
       });
     }
 
+    if (req.user.role === 'DOCTOR' && roles.includes('DOCTOR')) {
+      const authorization = await authorizeProfessionalRequest({
+        req,
+        userId: req.user.id,
+        currentRole: req.user.role,
+      });
+      if (!authorization.allowed) {
+        return res.status(authorization.status).json({
+          error: authorization.code,
+          code: authorization.code,
+          message: authorization.message,
+        });
+      }
+    }
+
     next();
   };
+};
+
+/** Applies the DOCTOR cutover to multi-role endpoints that only use authenticate. */
+export const requireProfessionalAccessForDoctor = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  if (!req.user) return res.status(401).json({ error: 'Usuario no autenticado' });
+  if (req.user.role !== 'DOCTOR') return next();
+  const authorization = await authorizeProfessionalRequest({
+    req,
+    userId: req.user.id,
+    currentRole: req.user.role,
+  });
+  if (!authorization.allowed) {
+    return res.status(authorization.status).json({
+      error: authorization.code,
+      code: authorization.code,
+      message: authorization.message,
+    });
+  }
+  return next();
 };

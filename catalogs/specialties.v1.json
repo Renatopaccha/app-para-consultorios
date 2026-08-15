@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "1.0.0",
+  "source": "Read-only audit of Zenda legacy Specialty rows; no exhaustive specialty catalog",
+  "publishedAt": "2026-08-13",
+  "records": [
+    {
+      "professionCode": "MEDICINE",
+      "specialtyCode": "MEDICINE_GENERAL",
+      "displayName": "Medicina General",
+      "normalizedName": "medicina general",
+      "legacyNormalizedNames": ["medicina general"],
+      "isActive": true,
+      "sortOrder": 10,
+      "source": "Zenda legacy Specialty audit",
+      "sourceVersion": "2026-08-13"
+    },
+    {
+      "professionCode": "MEDICINE",
+      "specialtyCode": "CARDIOLOGY",
+      "displayName": "Cardiología",
+      "normalizedName": "cardiologia",
+      "legacyNormalizedNames": ["cardiologia"],
+      "isActive": true,
+      "sortOrder": 20,
+      "source": "Zenda legacy Specialty audit",
+      "sourceVersion": "2026-08-13"
+    }
+  ]
+}

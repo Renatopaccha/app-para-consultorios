@@ -75,6 +75,9 @@ describe('actualización segura del correo del doctor de desarrollo', () => {
   it('lets future development seeds find the same migrated doctor without duplication', async () => {
     const fixture = await createDevelopmentDoctorFixture();
     await updateExistingDevelopmentDoctorEmail(prisma, NEW_DOCTOR_EMAIL);
+    await prisma.healthProfession.create({
+      data: { code: 'MEDICINE', name: 'Medicina', nameNormalized: 'medicina' },
+    });
     await seedDevelopmentData(seedEnvironment);
     await seedDevelopmentData(seedEnvironment);
 

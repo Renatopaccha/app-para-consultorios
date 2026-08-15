@@ -1,11 +1,67 @@
 import { google } from 'googleapis';
 import prisma from '../prisma';
 
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  'http://localhost:3000/api/calendar/google/callback'
-);
+type CalendarPlatform = 'google' | 'outlook';
+type CalendarTaskSuccess = { platform: CalendarPlatform; eventId?: string };
+type CalendarTaskResult = CalendarTaskSuccess | null;
+type CalendarCredentials = {
+  googleAccessToken: string | null;
+  googleRefreshToken: string | null;
+  outlookAccessToken: string | null;
+};
+
+const GOOGLE_REDIRECT_URI = 'http://localhost:3000/api/calendar/google/callback';
+
+function createGoogleClient(accessToken: string | null, refreshToken: string | null) {
+  // OAuth2Client is mutable. A fresh instance prevents concurrent appointments
+  // from replacing each other's credentials before Google sends the request.
+  const client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    GOOGLE_REDIRECT_URI,
+  );
+  client.setCredentials({ access_token: accessToken, refresh_token: refreshToken });
+  return client;
+}
+
+function calendarCredentials(
+  doctor: CalendarCredentials,
+  clinic: CalendarCredentials,
+): CalendarCredentials {
+  // Creation uses the doctor's connected calendars whenever the doctor has at
+  // least one provider configured; updates/deletes must use that same owner.
+  const doctorHasProvider = Boolean(
+    doctor.googleAccessToken || doctor.googleRefreshToken || doctor.outlookAccessToken,
+  );
+  return doctorHasProvider ? doctor : clinic;
+}
+
+function errorStatus(error: unknown): number | null {
+  if (!error || typeof error !== 'object') return null;
+  const candidate = error as { code?: unknown; response?: { status?: unknown } };
+  if (typeof candidate.code === 'number') return candidate.code;
+  if (typeof candidate.response?.status === 'number') return candidate.response.status;
+  return null;
+}
+
+function logProviderFailure(operation: 'create' | 'update' | 'delete', platform: CalendarPlatform, error?: unknown) {
+  const status = errorStatus(error);
+  console.error(`[CalendarSync] ${operation} ${platform} failed${status ? ` (HTTP ${status})` : ''}`);
+}
+
+function successfulResults(results: PromiseSettledResult<CalendarTaskResult>[]): CalendarTaskSuccess[] {
+  return results.flatMap((result): CalendarTaskSuccess[] => result.status === 'fulfilled' && result.value ? [result.value] : []);
+}
+
+function reportAggregate(operation: 'sync' | 'update' | 'delete', appointmentId: string, requested: number, succeeded: number) {
+  if (succeeded === 0) {
+    console.error(`[CalendarSync] ${operation} failed for appointment ${appointmentId}: no provider succeeded.`);
+  } else if (succeeded < requested) {
+    console.warn(`[CalendarSync] ${operation} partially completed for appointment ${appointmentId}: ${succeeded}/${requested} providers succeeded.`);
+  } else {
+    console.log(`[CalendarSync] ${operation} completed for appointment ${appointmentId}: ${succeeded}/${requested} providers succeeded.`);
+  }
+}
 
 export const syncAppointmentToCalendar = async (appointmentId: string): Promise<boolean> => {
   try {
@@ -16,84 +72,62 @@ export const syncAppointmentToCalendar = async (appointmentId: string): Promise<
         patientInvitation: { select: { email: true, firstName: true, lastName: true, phone: true } },
         doctorProfile: true,
         clinicProfile: true,
-        service: true
-      }
+        service: true,
+      },
     });
 
     if (!appointment) {
-      throw new Error(`No se encontró la cita con ID ${appointmentId}`);
-    }
-
-    const timeZone = 'America/Guayaquil';
-    const dateStr = appointment.date.toISOString().split('T')[0]; 
-    const startDateTime = `${dateStr}T${appointment.startTime}:00-05:00`;
-    const endDateTime = `${dateStr}T${appointment.endTime}:00-05:00`;
-
-    const patient = appointment.patient || appointment.patientInvitation || { firstName: appointment.invitedPatientFirstName || 'Paciente', lastName: appointment.invitedPatientLastName || 'invitado', email: appointment.invitedPatientEmail || '', phone: appointment.invitedPatientPhone };
-    let eventTitle = `Cita Zenda - ${patient.firstName} ${patient.lastName}`;
-    
-    if (appointment.paymentStatus === 'PENDING_CASH') {
-      if (appointment.patientConfirmationStatus === 'CONFIRMED') {
-        eventTitle = `Asistencia Confirmada (Falta Pago Efectivo) - ${patient.firstName} ${patient.lastName}`;
-      } else {
-        eventTitle = `Reserva - Falta confirmar asistencia (Pago Pendiente) - ${patient.firstName} ${patient.lastName}`;
-      }
-    }
-
-    const eventDescription = `Servicio: ${appointment.service.name}\nPaciente: ${patient.email}\nTeléfono: ${patient.phone || 'No registrado'}`;
-
-    const doc = appointment.doctorProfile;
-    const clinic = appointment.clinicProfile;
-
-    const syncTasks: Promise<{ platform: 'google'|'outlook', eventId: string } | null>[] = [];
-
-    if ((doc.googleRefreshToken || doc.googleAccessToken) || (doc.outlookRefreshToken || doc.outlookAccessToken)) {
-      if (doc.googleRefreshToken || doc.googleAccessToken) {
-        syncTasks.push(syncToGoogleCalendar(doc.googleAccessToken, doc.googleRefreshToken, eventTitle, eventDescription, startDateTime, endDateTime, timeZone));
-      }
-      if (doc.outlookRefreshToken || doc.outlookAccessToken) {
-        syncTasks.push(syncToOutlookCalendar(doc.outlookAccessToken, eventTitle, eventDescription, startDateTime, endDateTime, timeZone));
-      }
-    } else {
-      if (clinic.googleRefreshToken || clinic.googleAccessToken) {
-        syncTasks.push(syncToGoogleCalendar(clinic.googleAccessToken, clinic.googleRefreshToken, eventTitle, eventDescription, startDateTime, endDateTime, timeZone));
-      }
-      if (clinic.outlookRefreshToken || clinic.outlookAccessToken) {
-        syncTasks.push(syncToOutlookCalendar(clinic.outlookAccessToken, eventTitle, eventDescription, startDateTime, endDateTime, timeZone));
-      }
-    }
-
-    if (syncTasks.length === 0) {
-      console.log(`[CalendarSync] No hay tokens configurados para la cita ${appointmentId}`);
+      console.warn(`[CalendarSync] Cannot sync missing appointment ${appointmentId}.`);
       return false;
     }
 
-    const results = await Promise.allSettled(syncTasks);
-    
-    let googleEventId: string | null = null;
-    let outlookEventId: string | null = null;
+    const timeZone = 'America/Guayaquil';
+    const dateStr = appointment.date.toISOString().split('T')[0];
+    const startDateTime = `${dateStr}T${appointment.startTime}:00-05:00`;
+    const endDateTime = `${dateStr}T${appointment.endTime}:00-05:00`;
+    const patient = appointment.patient || appointment.patientInvitation || {
+      firstName: appointment.invitedPatientFirstName || 'Paciente',
+      lastName: appointment.invitedPatientLastName || 'invitado',
+      email: appointment.invitedPatientEmail || '',
+      phone: appointment.invitedPatientPhone,
+    };
+    const eventTitle = appointment.paymentStatus === 'PENDING_CASH'
+      ? appointment.patientConfirmationStatus === 'CONFIRMED'
+        ? `Asistencia Confirmada (Falta Pago Efectivo) - ${patient.firstName} ${patient.lastName}`
+        : `Reserva - Falta confirmar asistencia (Pago Pendiente) - ${patient.firstName} ${patient.lastName}`
+      : `Cita Zenda - ${patient.firstName} ${patient.lastName}`;
+    const eventDescription = `Servicio: ${appointment.service.name}\nPaciente: ${patient.email}\nTeléfono: ${patient.phone || 'No registrado'}`;
+    const credentials = calendarCredentials(appointment.doctorProfile, appointment.clinicProfile);
+    const tasks: Promise<CalendarTaskResult>[] = [];
 
-    results.forEach(result => {
-      if (result.status === 'fulfilled' && result.value) {
-        if (result.value.platform === 'google') googleEventId = result.value.eventId;
-        if (result.value.platform === 'outlook') outlookEventId = result.value.eventId;
-      }
-    });
-
-    if (googleEventId || outlookEventId) {
-      await prisma.appointment.update({
-        where: { id: appointmentId },
-        data: {
-          ...(googleEventId ? { googleEventId } : {}),
-          ...(outlookEventId ? { outlookEventId } : {})
-        }
-      });
+    if (credentials.googleAccessToken || credentials.googleRefreshToken) {
+      tasks.push(syncToGoogleCalendar(credentials.googleAccessToken, credentials.googleRefreshToken, eventTitle, eventDescription, startDateTime, endDateTime, timeZone));
+    }
+    if (credentials.outlookAccessToken) {
+      tasks.push(syncToOutlookCalendar(credentials.outlookAccessToken, eventTitle, eventDescription, startDateTime, endDateTime, timeZone));
+    }
+    if (tasks.length === 0) {
+      console.log(`[CalendarSync] No configured calendar provider for appointment ${appointmentId}.`);
+      return false;
     }
 
-    return true;
+    const results = await Promise.allSettled(tasks);
+    const succeeded = successfulResults(results);
+    reportAggregate('sync', appointmentId, tasks.length, succeeded.length);
+    if (succeeded.length === 0) return false;
 
+    const googleEventId = succeeded.find((result) => result.platform === 'google')?.eventId;
+    const outlookEventId = succeeded.find((result) => result.platform === 'outlook')?.eventId;
+    await prisma.appointment.update({
+      where: { id: appointmentId },
+      data: {
+        ...(googleEventId ? { googleEventId } : {}),
+        ...(outlookEventId ? { outlookEventId } : {}),
+      },
+    });
+    return true;
   } catch (error) {
-    console.error(`[CalendarSync] Error al sincronizar la cita ${appointmentId}:`, error);
+    console.error(`[CalendarSync] Sync failed for appointment ${appointmentId}:`, error instanceof Error ? error.message : 'unknown error');
     return false;
   }
 };
@@ -106,68 +140,43 @@ export const updateCalendarEventStatus = async (appointmentId: string): Promise<
         patient: true,
         patientInvitation: { select: { firstName: true, lastName: true } },
         doctorProfile: true,
-        clinicProfile: true
-      }
+        clinicProfile: true,
+      },
     });
-
-    if (!appointment) throw new Error('Cita no encontrada');
-
-    const patient = appointment.patient || appointment.patientInvitation || { firstName: appointment.invitedPatientFirstName || 'Paciente', lastName: appointment.invitedPatientLastName || 'invitado' };
-    let newTitle = `Cita Zenda - ${patient.firstName} ${patient.lastName}`;
-    
-    if (appointment.paymentStatus === 'PENDING_CASH') {
-      if (appointment.patientConfirmationStatus === 'CONFIRMED') {
-        newTitle = `Asistencia Confirmada (Falta Pago Efectivo) - ${patient.firstName} ${patient.lastName}`;
-      } else {
-        newTitle = `Reserva - Falta confirmar asistencia (Pago Pendiente) - ${patient.firstName} ${patient.lastName}`;
-      }
-    }
-    const doc = appointment.doctorProfile;
-    const clinic = appointment.clinicProfile;
-    
-    const updateTasks: Promise<any>[] = [];
-
-    if (appointment.googleEventId) {
-      const gAccessToken = doc.googleAccessToken || clinic.googleAccessToken;
-      const gRefreshToken = doc.googleRefreshToken || clinic.googleRefreshToken;
-      
-      if (gAccessToken || gRefreshToken) {
-        oauth2Client.setCredentials({ access_token: gAccessToken, refresh_token: gRefreshToken });
-        const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-        updateTasks.push(
-          calendar.events.patch({
-            calendarId: 'primary',
-            eventId: appointment.googleEventId,
-            requestBody: { summary: newTitle }
-          })
-        );
-      }
+    if (!appointment) {
+      console.warn(`[CalendarSync] Cannot update missing appointment ${appointmentId}.`);
+      return false;
     }
 
-    if (appointment.outlookEventId) {
-      const oAccessToken = doc.outlookAccessToken || clinic.outlookAccessToken;
-      if (oAccessToken) {
-        updateTasks.push(
-          fetch(`https://graph.microsoft.com/v1.0/me/events/${appointment.outlookEventId}`, {
-            method: 'PATCH',
-            headers: {
-              'Authorization': `Bearer ${oAccessToken}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ subject: newTitle })
-          })
-        );
-      }
+    const patient = appointment.patient || appointment.patientInvitation || {
+      firstName: appointment.invitedPatientFirstName || 'Paciente',
+      lastName: appointment.invitedPatientLastName || 'invitado',
+    };
+    const title = appointment.paymentStatus === 'PENDING_CASH'
+      ? appointment.patientConfirmationStatus === 'CONFIRMED'
+        ? `Asistencia Confirmada (Falta Pago Efectivo) - ${patient.firstName} ${patient.lastName}`
+        : `Reserva - Falta confirmar asistencia (Pago Pendiente) - ${patient.firstName} ${patient.lastName}`
+      : `Cita Zenda - ${patient.firstName} ${patient.lastName}`;
+    const credentials = calendarCredentials(appointment.doctorProfile, appointment.clinicProfile);
+    const tasks: Promise<CalendarTaskResult>[] = [];
+
+    if (appointment.googleEventId && (credentials.googleAccessToken || credentials.googleRefreshToken)) {
+      tasks.push(updateGoogleEvent(credentials.googleAccessToken, credentials.googleRefreshToken, appointment.googleEventId, title));
+    }
+    if (appointment.outlookEventId && credentials.outlookAccessToken) {
+      tasks.push(updateOutlookEvent(credentials.outlookAccessToken, appointment.outlookEventId, title));
+    }
+    if (tasks.length === 0) {
+      console.log(`[CalendarSync] No configured event provider to update for appointment ${appointmentId}.`);
+      return false;
     }
 
-    if (updateTasks.length > 0) {
-      await Promise.allSettled(updateTasks);
-      console.log(`[CalendarSync] Evento actualizado para la cita ${appointmentId}`);
-    }
-
-    return true;
+    const results = await Promise.allSettled(tasks);
+    const succeeded = successfulResults(results);
+    reportAggregate('update', appointmentId, tasks.length, succeeded.length);
+    return succeeded.length > 0;
   } catch (error) {
-    console.error(`[CalendarSync] Error al actualizar el evento de la cita ${appointmentId}:`, error);
+    console.error(`[CalendarSync] Update failed for appointment ${appointmentId}:`, error instanceof Error ? error.message : 'unknown error');
     return false;
   }
 };
@@ -176,146 +185,118 @@ export const deleteCalendarEvent = async (appointmentId: string): Promise<boolea
   try {
     const appointment = await prisma.appointment.findUnique({
       where: { id: appointmentId },
-      include: {
-        doctorProfile: true,
-        clinicProfile: true
-      }
+      include: { doctorProfile: true, clinicProfile: true },
     });
-
-    if (!appointment) throw new Error('Cita no encontrada');
-
-    const doc = appointment.doctorProfile;
-    const clinic = appointment.clinicProfile;
-    
-    const deleteTasks: Promise<any>[] = [];
-
-    if (appointment.googleEventId) {
-      const gAccessToken = doc.googleAccessToken || clinic.googleAccessToken;
-      const gRefreshToken = doc.googleRefreshToken || clinic.googleRefreshToken;
-      
-      if (gAccessToken || gRefreshToken) {
-        oauth2Client.setCredentials({ access_token: gAccessToken, refresh_token: gRefreshToken });
-        const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-        deleteTasks.push(
-          calendar.events.delete({
-            calendarId: 'primary',
-            eventId: appointment.googleEventId
-          })
-        );
-      }
+    if (!appointment) {
+      console.warn(`[CalendarSync] Cannot delete calendar events for missing appointment ${appointmentId}.`);
+      return false;
     }
 
-    if (appointment.outlookEventId) {
-      const oAccessToken = doc.outlookAccessToken || clinic.outlookAccessToken;
-      if (oAccessToken) {
-        deleteTasks.push(
-          fetch(`https://graph.microsoft.com/v1.0/me/events/${appointment.outlookEventId}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${oAccessToken}` }
-          })
-        );
-      }
+    const credentials = calendarCredentials(appointment.doctorProfile, appointment.clinicProfile);
+    const tasks: Promise<CalendarTaskResult>[] = [];
+    if (appointment.googleEventId && (credentials.googleAccessToken || credentials.googleRefreshToken)) {
+      tasks.push(deleteGoogleEvent(credentials.googleAccessToken, credentials.googleRefreshToken, appointment.googleEventId));
+    }
+    if (appointment.outlookEventId && credentials.outlookAccessToken) {
+      tasks.push(deleteOutlookEvent(credentials.outlookAccessToken, appointment.outlookEventId));
+    }
+    if (tasks.length === 0) {
+      console.log(`[CalendarSync] No configured event provider to delete for appointment ${appointmentId}.`);
+      return false;
     }
 
-    if (deleteTasks.length > 0) {
-      await Promise.allSettled(deleteTasks);
-      console.log(`[CalendarSync] Evento eliminado para la cita ${appointmentId}`);
-    }
-
-    return true;
+    const results = await Promise.allSettled(tasks);
+    const succeeded = successfulResults(results);
+    reportAggregate('delete', appointmentId, tasks.length, succeeded.length);
+    return succeeded.length > 0;
   } catch (error) {
-    console.error(`[CalendarSync] Error al eliminar el evento de la cita ${appointmentId}:`, error);
+    console.error(`[CalendarSync] Delete failed for appointment ${appointmentId}:`, error instanceof Error ? error.message : 'unknown error');
     return false;
   }
 };
 
-
-// -------------------------------------------------------------
-// HELPERS DE SINCRONIZACIÓN
-// -------------------------------------------------------------
-
-async function syncToGoogleCalendar(
-  accessToken: string | null,
-  refreshToken: string | null,
-  summary: string,
-  description: string,
-  startDateTime: string,
-  endDateTime: string,
-  timeZone: string
-): Promise<{ platform: 'google', eventId: string } | null> {
+async function syncToGoogleCalendar(accessToken: string | null, refreshToken: string | null, summary: string, description: string, startDateTime: string, endDateTime: string, timeZone: string): Promise<CalendarTaskResult> {
   try {
-    oauth2Client.setCredentials({
-      access_token: accessToken,
-      refresh_token: refreshToken
-    });
-
-    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-    
-    const response = await calendar.events.insert({
-      calendarId: 'primary',
-      requestBody: {
-        summary,
-        description,
-        start: { dateTime: startDateTime, timeZone },
-        end: { dateTime: endDateTime, timeZone }
-      }
-    });
-
-    console.log('[CalendarSync] Evento creado en Google Calendar exitosamente.');
-    return { platform: 'google', eventId: response.data.id as string };
+    const calendar = google.calendar({ version: 'v3', auth: createGoogleClient(accessToken, refreshToken) });
+    const response = await calendar.events.insert({ calendarId: 'primary', requestBody: { summary, description, start: { dateTime: startDateTime, timeZone }, end: { dateTime: endDateTime, timeZone } } });
+    if (!response.data.id) {
+      logProviderFailure('create', 'google');
+      return null;
+    }
+    return { platform: 'google', eventId: response.data.id };
   } catch (error) {
-    console.error('[CalendarSync] Error conectando con Google Calendar API:', error);
+    logProviderFailure('create', 'google', error);
     return null;
   }
 }
 
-async function syncToOutlookCalendar(
-  accessToken: string | null,
-  subject: string,
-  content: string,
-  startDateTime: string,
-  endDateTime: string,
-  timeZone: string
-): Promise<{ platform: 'outlook', eventId: string } | null> {
-  if (!accessToken) return null;
-
+async function syncToOutlookCalendar(accessToken: string, subject: string, content: string, startDateTime: string, endDateTime: string, timeZone: string): Promise<CalendarTaskResult> {
   try {
-    const eventPayload = {
-      subject,
-      body: {
-        contentType: 'HTML',
-        content: content.replace(/\n/g, '<br>')
-      },
-      start: {
-        dateTime: startDateTime.slice(0, 19), 
-        timeZone
-      },
-      end: {
-        dateTime: endDateTime.slice(0, 19),
-        timeZone
-      }
-    };
-
     const response = await fetch('https://graph.microsoft.com/v1.0/me/events', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(eventPayload)
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject, body: { contentType: 'HTML', content: content.replace(/\n/g, '<br>') }, start: { dateTime: startDateTime.slice(0, 19), timeZone }, end: { dateTime: endDateTime.slice(0, 19), timeZone } }),
     });
-
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error(`Graph API Error: ${JSON.stringify(errorData)}`);
+      logProviderFailure('create', 'outlook', { response: { status: response.status } });
       return null;
     }
-
-    const data = await response.json();
-    console.log('[CalendarSync] Evento creado en Outlook Calendar exitosamente.');
-    return { platform: 'outlook', eventId: data.id };
+    const data = await response.json() as { id?: unknown };
+    return typeof data.id === 'string' && data.id ? { platform: 'outlook', eventId: data.id } : null;
   } catch (error) {
-    console.error('[CalendarSync] Error conectando con Microsoft Graph API:', error);
+    logProviderFailure('create', 'outlook', error);
+    return null;
+  }
+}
+
+async function updateGoogleEvent(accessToken: string | null, refreshToken: string | null, eventId: string, summary: string): Promise<CalendarTaskResult> {
+  try {
+    const calendar = google.calendar({ version: 'v3', auth: createGoogleClient(accessToken, refreshToken) });
+    await calendar.events.patch({ calendarId: 'primary', eventId, requestBody: { summary } });
+    return { platform: 'google' };
+  } catch (error) {
+    logProviderFailure('update', 'google', error);
+    return null;
+  }
+}
+
+async function updateOutlookEvent(accessToken: string, eventId: string, subject: string): Promise<CalendarTaskResult> {
+  try {
+    const response = await fetch(`https://graph.microsoft.com/v1.0/me/events/${eventId}`, { method: 'PATCH', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ subject }) });
+    if (!response.ok) {
+      logProviderFailure('update', 'outlook', { response: { status: response.status } });
+      return null;
+    }
+    return { platform: 'outlook' };
+  } catch (error) {
+    logProviderFailure('update', 'outlook', error);
+    return null;
+  }
+}
+
+async function deleteGoogleEvent(accessToken: string | null, refreshToken: string | null, eventId: string): Promise<CalendarTaskResult> {
+  try {
+    const calendar = google.calendar({ version: 'v3', auth: createGoogleClient(accessToken, refreshToken) });
+    await calendar.events.delete({ calendarId: 'primary', eventId });
+    return { platform: 'google' };
+  } catch (error) {
+    // Deletion is idempotent: a missing remote event already satisfies the goal.
+    if (errorStatus(error) === 404) return { platform: 'google' };
+    logProviderFailure('delete', 'google', error);
+    return null;
+  }
+}
+
+async function deleteOutlookEvent(accessToken: string, eventId: string): Promise<CalendarTaskResult> {
+  try {
+    const response = await fetch(`https://graph.microsoft.com/v1.0/me/events/${eventId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${accessToken}` } });
+    // Microsoft Graph 404 is also treated as idempotent success: the desired
+    // postcondition is that the event is absent.
+    if (response.ok || response.status === 404) return { platform: 'outlook' };
+    logProviderFailure('delete', 'outlook', { response: { status: response.status } });
+    return null;
+  } catch (error) {
+    logProviderFailure('delete', 'outlook', error);
     return null;
   }
 }

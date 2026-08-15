@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "1.0.0",
+  "source": "IANA Language Subtag Registry (BCP 47), registry dated 2026-08-08",
+  "publishedAt": "2026-08-13",
+  "records": [
+    { "code": "es", "displayName": "Español", "normalizedName": "espanol", "isActive": true, "sortOrder": 10 },
+    { "code": "en", "displayName": "Inglés", "normalizedName": "ingles", "isActive": true, "sortOrder": 20 },
+    { "code": "pt", "displayName": "Portugués", "normalizedName": "portugues", "isActive": true, "sortOrder": 30 },
+    { "code": "fr", "displayName": "Francés", "normalizedName": "frances", "isActive": true, "sortOrder": 40 },
+    { "code": "it", "displayName": "Italiano", "normalizedName": "italiano", "isActive": true, "sortOrder": 50 },
+    { "code": "de", "displayName": "Alemán", "normalizedName": "aleman", "isActive": true, "sortOrder": 60 },
+    { "code": "qu-EC", "displayName": "Kichwa/Quichua", "normalizedName": "kichwa/quichua", "isActive": true, "sortOrder": 70 }
+  ]
+}

@@ -13,6 +13,7 @@ import { linkClerkIdentity, recordIdentityLinkAudit, AuthIdentityLinkError } fro
 import { resolveVerifiedClerkIdentity } from '../services/clerkSession.service';
 import { verifyLegacyPassword } from '../services/legacyCredential.service';
 import { availablePortalsForRole, isRequestedPortal, resolvePortalForRole } from '../services/portalAccess.service';
+import { authorizeProfessionalRequest } from '../services/professionalAuthorizationEnforcement.service';
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -241,7 +242,7 @@ export const me = async (req: AuthRequest, res: Response) => {
  * identity to the canonical Zenda user and PostgreSQL role. The request body
  * expresses intent; it never grants a role or controls the destination.
  */
-export const resolvePortal = (req: AuthRequest, res: Response) => {
+export const resolvePortal = async (req: AuthRequest, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'No autorizado' });
 
   const body = req.body;
@@ -260,6 +261,22 @@ export const resolvePortal = (req: AuthRequest, res: Response) => {
   }
 
   const resolution = resolvePortalForRole(req.user.role, body.portal);
+  if (body.portal === 'professional' && req.user.role === 'DOCTOR') {
+    const authorization = await authorizeProfessionalRequest({
+      req,
+      userId: req.user.id,
+      currentRole: req.user.role,
+      capability: 'PORTAL professional',
+    });
+    if (!authorization.allowed) {
+      return res.status(authorization.status).json({
+        error: authorization.code,
+        code: authorization.code,
+        message: authorization.message,
+        requestedPortal: body.portal,
+      });
+    }
+  }
   if (!resolution) {
     return res.status(403).json({
       error: 'Esta cuenta no tiene acceso al espacio solicitado.',

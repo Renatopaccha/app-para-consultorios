@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "1.0.0",
+  "source": "Official SENESCYT and ACESS public registries; identifier semantics pending product/legal review",
+  "publishedAt": "2026-08-13",
+  "records": [
+    {
+      "countryCode": "EC",
+      "registryNamespace": "SENESCYT:REGISTERED_TITLES",
+      "displayName": "Registro de títulos de educación superior (SENESCYT)",
+      "normalizedName": "registro de titulos de educacion superior (senescyt)",
+      "healthProfessionCode": null,
+      "isVerified": true,
+      "isActive": true,
+      "sourceReference": "https://titulos-edusuperior.minedec.gob.ec/consulta-titulos-web/faces/vista/consulta/consulta.xhtml",
+      "decisionStatus": "PENDING_CATALOG_DECISION",
+      "pendingDecision": "No importar hasta diseñar ProfessionalRegulatoryIdentity: el documento consultado identifica privadamente a la persona y no es el registrationNumber de una credencial individual."
+    },
+    {
+      "countryCode": "EC",
+      "registryNamespace": "ACESS:HEALTH_PROFESSIONAL_REGISTRY",
+      "displayName": "Registro de títulos de profesionales de la salud (ACESS)",
+      "normalizedName": "registro de titulos de profesionales de la salud (acess)",
+      "healthProfessionCode": null,
+      "isVerified": true,
+      "isActive": true,
+      "sourceReference": "https://www.acess.gob.ec/acess-app-servicio-ciudadano/public/titulo/consulta.jsf",
+      "decisionStatus": "PENDING_CATALOG_DECISION",
+      "pendingDecision": "No importar hasta diseñar ProfessionalRegulatoryIdentity: el documento de identidad es PRIVATE_VERIFICATION de la persona y no es el registrationNumber de cada título o especialidad."
+    }
+  ]
+}

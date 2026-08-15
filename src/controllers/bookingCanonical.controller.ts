@@ -5,7 +5,7 @@ import { BookingError, createAppointment } from '../services/appointmentBooking.
 import { cancelAppointment, rescheduleAppointment } from '../services/appointmentBooking.service';
 import { confirmPatientAppointment } from '../services/appointmentConfirmation.service';
 import { getAppointmentCalendarPresentation } from '../services/appointmentCalendarPresentation.service';
-import { localDateTimeToUtc, localDate, localTime, localWeekday, minutes } from '../utils/scheduling';
+import { localDateTimeToUtc, localWeekday, minutes } from '../utils/scheduling';
 import { isDoctorCancellationReason } from '../services/appointmentChangePolicy.service';
 import { activeScheduleBlockWhere } from '../domain/scheduleBlockState';
 

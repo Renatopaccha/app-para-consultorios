@@ -1,0 +1,10 @@
+{
+  "algorithm": "sha256",
+  "files": {
+    "professions.v1.json": "7ffd4042a4f878c340ea9ad19a3485ff54d64a9b55d8eb207e562e0525ee17e0",
+    "languages.v1.json": "c703eda22f39a5bc385934092fb4a9f4a4d2876c8a228aca3b8df3f7387e6889",
+    "registration-authorities.ec.v1.json": "655fafbed7d984bfb035a44f058592dee9eee2cb6e666cf22f88448f050ae202",
+    "institutions.v1.json": "92478f613410cf1596c37a35d6fea85fbacc99066c84057edccf717b52bfeb3d",
+    "specialties.v1.json": "92058214839bdc35b51c75c5bdba2dc9e0664976327539b2ffbedc29f933f89c"
+  }
+}

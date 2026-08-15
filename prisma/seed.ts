@@ -40,9 +40,18 @@ async function passwordHash(password: string, variable: string): Promise<string>
 }
 
 async function ensureCatalogs() {
-  const specialtyNames = ['Medicina General', 'Cardiología'];
+  const profession = await prisma.healthProfession.findUnique({ where: { code: 'MEDICINE' } });
+  if (!profession) throw new Error('El catálogo profesional debe importarse antes del seed de desarrollo.');
+  const specialtyDefinitions = [
+    { code: 'MEDICINE_GENERAL', name: 'Medicina General', nameNormalized: 'medicina general' },
+    { code: 'CARDIOLOGY', name: 'Cardiología', nameNormalized: 'cardiologia' },
+  ];
   const insuranceNames = ['Privado / Particular', 'IESS'];
-  const specialties = await Promise.all(specialtyNames.map((name) => prisma.specialty.upsert({ where: { name }, update: {}, create: { name } })));
+  const specialties = await Promise.all(specialtyDefinitions.map((specialty) => prisma.specialty.upsert({
+    where: { healthProfessionId_code: { healthProfessionId: profession.id, code: specialty.code } },
+    update: { name: specialty.name, nameNormalized: specialty.nameNormalized, isActive: true },
+    create: { ...specialty, healthProfessionId: profession.id },
+  })));
   const insurances = await Promise.all(insuranceNames.map((name) => prisma.insurance.upsert({ where: { name }, update: {}, create: { name } })));
   return { specialties, insurances };
 }

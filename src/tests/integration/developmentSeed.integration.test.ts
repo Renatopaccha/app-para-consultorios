@@ -23,6 +23,9 @@ describe('seed de desarrollo idempotente', () => {
   afterAll(async () => { await clearIntegrationDatabase(); await disconnectPrisma(); });
 
   it('puede ejecutarse dos veces sin duplicar el médico, vínculo ni servicios', async () => {
+    await prisma.healthProfession.create({
+      data: { code: 'MEDICINE', name: 'Medicina', nameNormalized: 'medicina' },
+    });
     await seedDevelopmentData(environment);
     await seedDevelopmentData(environment);
     const doctorUser = await prisma.user.findUnique({ where: { email: environment.DEV_DOCTOR_EMAIL }, include: { doctorProfile: { include: { workplaces: true, services: true } } } });

@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../middlewares/auth.middleware';
+import { authenticate, requireProfessionalAccessForDoctor, requireRole } from '../middlewares/auth.middleware';
 import { createScheduleBlock, deleteScheduleBlock, listScheduleBlocks, updateScheduleBlock } from '../controllers/scheduleBlock.controller';
 const router = Router();
 router.use(authenticate);
-router.get('/', listScheduleBlocks);
+router.get('/', requireProfessionalAccessForDoctor, listScheduleBlocks);
 router.post('/', requireRole(['DOCTOR', 'CLINIC_ADMIN', 'ASSISTANT']), createScheduleBlock);
 router.patch('/:id', requireRole(['DOCTOR']), updateScheduleBlock);
 router.delete('/:id', requireRole(['DOCTOR']), deleteScheduleBlock);

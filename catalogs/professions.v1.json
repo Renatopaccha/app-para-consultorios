@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "1.0.0",
+  "source": "Zenda V1 product decision",
+  "publishedAt": "2026-08-13",
+  "records": [
+    {
+      "code": "MEDICINE",
+      "displayName": "Medicina",
+      "normalizedName": "medicina",
+      "isActive": true,
+      "requiresSpecialty": false,
+      "credentialPolicyVersion": 1,
+      "sortOrder": 10
+    },
+    {
+      "code": "DENTISTRY",
+      "displayName": "Odontología",
+      "normalizedName": "odontologia",
+      "isActive": true,
+      "requiresSpecialty": false,
+      "credentialPolicyVersion": 1,
+      "sortOrder": 20
+    },
+    {
+      "code": "PSYCHOLOGY",
+      "displayName": "Psicología",
+      "normalizedName": "psicologia",
+      "isActive": true,
+      "requiresSpecialty": false,
+      "credentialPolicyVersion": 1,
+      "sortOrder": 30
+    }
+  ]
+}

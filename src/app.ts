@@ -1,3 +1,4 @@
+import 'newrelic';
 import express, { Application, ErrorRequestHandler, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -22,7 +23,9 @@ import turnRoutes from './routes/turn.routes';
 import cashPaymentRoutes from './routes/cashPayment.routes';
 import financeRoutes from './routes/finance.routes';
 import notificationRoutes from './routes/notification.routes';
+import professionalOnboardingRoutes from './routes/professionalOnboarding.routes';
 import { clerkSessionMiddleware } from './services/clerkSession.service';
+import { assertProfessionalAuthConfiguration } from './config/professionalAuthorization';
 
 // Cargar variables de entorno. Tests never load development configuration.
 if (process.env.NODE_ENV === 'test') {
@@ -30,6 +33,7 @@ if (process.env.NODE_ENV === 'test') {
 } else {
   dotenv.config();
 }
+assertProfessionalAuthConfiguration();
 
 const app: Application = express();
 const allowedOrigins = (process.env.CORS_ORIGIN || '')
@@ -70,6 +74,7 @@ app.use('/api/turns', turnRoutes);
 app.use('/api/cash-payments', cashPaymentRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/professional-onboarding', professionalOnboardingRoutes);
 
 const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   console.error('[API] Unhandled request error:', error instanceof Error ? error.message : error);

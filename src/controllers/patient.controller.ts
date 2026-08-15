@@ -1,9 +1,9 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
-import { buildServiceSnapshot } from '../services/serviceSnapshot.service';
+
 import { createAppointment } from '../services/appointmentBooking.service';
-import { notificationService } from '../services/notification.service';
+
 
 /**
  * 1. GET /api/patients/doctors (Buscador)

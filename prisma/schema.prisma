@@ -180,34 +180,143 @@ enum AuthIdentityLinkEvent {
   SUSPENDED
 }
 
+enum ProfessionalApplicationStatus {
+  DRAFT
+  PENDING_REVIEW
+  NEEDS_CHANGES
+  APPROVED
+  REJECTED
+}
+
+enum ProfessionalCredentialType {
+  PRIMARY_DEGREE
+  SPECIALTY
+  SUBSPECIALTY
+  MASTER
+  PHD
+  OTHER_RELEVANT
+}
+
+enum CredentialOwnershipStatus {
+  CLAIMED
+  DISPUTED
+  RELEASED
+}
+
+enum CredentialVerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum CredentialDocumentKind {
+  PRIMARY_EVIDENCE
+  SUPPORTING_EVIDENCE
+}
+
+enum DocumentScanStatus {
+  PENDING
+  CLEAN
+  REJECTED
+  ERROR
+}
+
+enum ApplicationAssetCategory {
+  AVATAR
+  PRACTICE_INTERIOR
+  PRACTICE_EXTERIOR
+}
+
+enum ApplicationAssetModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum LocationPrecision {
+  EXACT
+  APPROXIMATE
+  CITY
+}
+
+enum ProfessionalApplicationReviewAction {
+  SUBMITTED
+  CHANGES_REQUESTED
+  RESUBMITTED
+  APPROVED
+  REJECTED
+  REOPENED
+}
+
+enum RegulatoryDocumentType {
+  NATIONAL_ID
+  PASSPORT
+  OTHER
+}
+
+enum RegulatoryIdentityVerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum ProfessionalAccessStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+}
+
+enum ProfessionalAccessSource {
+  APPLICATION_APPROVAL
+  LEGACY_BACKFILL
+  ADMINISTRATIVE_REPAIR
+}
+
+enum ProfessionalAccessAuditAction {
+  ACTIVATED
+  SUSPENDED
+  REACTIVATED
+  REVOKED
+  REPAIRED
+}
+
+enum UserRoleAssignmentSource {
+  PROFESSIONAL_APPROVAL
+  LEGACY_BACKFILL
+  ADMINISTRATIVE
+  INVITATION
+}
+
 // ---------------------------------------------------------------------------
 // 1. MODELO CENTRAL: USER Y SEGURIDAD
 // ---------------------------------------------------------------------------
 
 model User {
-  id        String  @id @default(uuid())
-  firstName String
-  lastName  String
-  email     String  @unique
+  id              String  @id @default(uuid())
+  firstName       String
+  lastName        String
+  email           String  @unique
   // Canonical identity used for all authentication and uniqueness checks.
-  emailNormalized String @unique
-  phone     String?
-  role      Role    @default(PATIENT)
+  emailNormalized String  @unique
+  phone           String?
+  role            Role    @default(PATIENT)
 
   // Auth & SSO
   // External identity only. User.id remains the canonical Zenda identifier.
-  clerkUserId String? @unique
+  clerkUserId  String? @unique
   passwordHash String?
   provider     String? // "google", "apple", "local"
   googleId     String? @unique
   fcmToken     String? // Firebase FCM Token
 
   // Seguridad (Fase 2)
-  resetPasswordToken   String?   @unique
-  resetPasswordExpires DateTime?
-  twoFactorCode        String?
-  twoFactorExpires     DateTime?
-  is2FAEnabled         Boolean   @default(false)
+  resetPasswordToken         String?   @unique
+  resetPasswordExpires       DateTime?
+  twoFactorCode              String?
+  twoFactorExpires           DateTime?
+  is2FAEnabled               Boolean   @default(false)
   emailVerifiedAt            DateTime? @db.Timestamptz(3)
   emailVerificationTokenHash String?   @unique
   emailVerificationExpires   DateTime? @db.Timestamptz(3)
@@ -221,20 +330,30 @@ model User {
   assistantProfile AssistantProfile?
 
   // Relaciones
-  appointmentsAsPatient       Appointment[]                @relation("PatientAppointments")
-  reviewsGiven                Review[]                     @relation("PatientReviews")
-  securityLogs                SecurityLog[]
-  invitationsCreated          Invitation[]                 @relation("InvitationsCreated")
-  patientInvitationsCreated   PatientInvitation[]          @relation("PatientInvitationsCreated")
-  paymentsConfirmed           Payment[]                    @relation("PaymentConfirmedBy")
-  paymentEvents               PaymentEvent[]               @relation("PaymentEventActor")
-  paymentIdempotencyKeys      PaymentIdempotencyKey[]
-  paymentVerificationAttempts PaymentVerificationAttempt[] @relation("PaymentAttemptActor")
-  notifications               UserNotification[]
-  certificationsReviewed      Certification[]               @relation("CertificationReviewer")
-  certificationAuditEvents    CertificationAuditLog[]        @relation("CertificationAuditActor")
-  identityLinkAudits          AuthIdentityLinkAudit[]         @relation("AuthIdentityLinkTarget")
-  identityLinkActions         AuthIdentityLinkAudit[]         @relation("AuthIdentityLinkActor")
+  appointmentsAsPatient          Appointment[]                      @relation("PatientAppointments")
+  reviewsGiven                   Review[]                           @relation("PatientReviews")
+  securityLogs                   SecurityLog[]
+  invitationsCreated             Invitation[]                       @relation("InvitationsCreated")
+  patientInvitationsCreated      PatientInvitation[]                @relation("PatientInvitationsCreated")
+  paymentsConfirmed              Payment[]                          @relation("PaymentConfirmedBy")
+  paymentEvents                  PaymentEvent[]                     @relation("PaymentEventActor")
+  paymentIdempotencyKeys         PaymentIdempotencyKey[]
+  paymentVerificationAttempts    PaymentVerificationAttempt[]       @relation("PaymentAttemptActor")
+  notifications                  UserNotification[]
+  certificationsReviewed         Certification[]                    @relation("CertificationReviewer")
+  certificationAuditEvents       CertificationAuditLog[]            @relation("CertificationAuditActor")
+  identityLinkAudits             AuthIdentityLinkAudit[]            @relation("AuthIdentityLinkTarget")
+  identityLinkActions            AuthIdentityLinkAudit[]            @relation("AuthIdentityLinkActor")
+  professionalApplications       ProfessionalApplication[]
+  professionalCredentials        ProfessionalCredential[]           @relation("ProfessionalCredentialOwner")
+  credentialsVerified            ProfessionalCredential[]           @relation("ProfessionalCredentialVerifier")
+  professionalReviewActions      ProfessionalApplicationReviewLog[] @relation("ProfessionalApplicationReviewActor")
+  regulatoryIdentities           ProfessionalRegulatoryIdentity[]   @relation("RegulatoryIdentityOwner")
+  regulatoryIdentitiesVerified   ProfessionalRegulatoryIdentity[]   @relation("RegulatoryIdentityVerifier")
+  professionalAccess             ProfessionalAccess?                @relation("ProfessionalAccessOwner")
+  professionalAccessUpdates      ProfessionalAccess[]               @relation("ProfessionalAccessUpdater")
+  professionalAccessAuditActions ProfessionalAccessAuditLog[]       @relation("ProfessionalAccessAuditActor")
+  roleAssignments                UserRoleAssignment[]
 
   @@index([email])
   @@index([resetPasswordToken])
@@ -278,15 +397,15 @@ model SecurityLog {
 // ---------------------------------------------------------------------------
 
 model ClinicProfile {
-  id        String  @id @default(uuid())
-  userId    String  @unique
+  id        String     @id @default(uuid())
+  userId    String     @unique
   name      String
   address   String
   phone     String?
   logoUrl   String?
   latitude  Float?
   longitude Float?
-  color     String? @db.VarChar(7)
+  color     String?    @db.VarChar(7)
   type      ClinicType @default(CLINIC)
 
   // Pagos y Suscripciones
@@ -308,18 +427,18 @@ model ClinicProfile {
   updatedAt DateTime @updatedAt
 
   // Relaciones
-  user              User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  affiliatedDoctors DoctorClinicWorkplace[]
-  appointments      Appointment[]
-  specialties       Specialty[]
-  insurances        Insurance[]
-  assistants        AssistantProfile[]
-  services          Service[]
-  scheduleBlocks    ScheduleBlock[]
-  invitations       Invitation[]            @relation("ClinicInvitations")
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  affiliatedDoctors  DoctorClinicWorkplace[]
+  appointments       Appointment[]
+  specialties        Specialty[]
+  insurances         Insurance[]
+  assistants         AssistantProfile[]
+  services           Service[]
+  scheduleBlocks     ScheduleBlock[]
+  invitations        Invitation[]            @relation("ClinicInvitations")
   patientInvitations PatientInvitation[]
-  confirmedPayments Payment[]               @relation("PaymentConfirmedClinic")
-  paymentEvents     PaymentEvent[]          @relation("PaymentEventClinic")
+  confirmedPayments  Payment[]               @relation("PaymentConfirmedClinic")
+  paymentEvents      PaymentEvent[]          @relation("PaymentEventClinic")
 
   @@index([latitude, longitude])
   @@index([subscriptionStatus])
@@ -339,7 +458,7 @@ model DoctorProfile {
   profileImageUrl    String?
   professionCode     ProfessionCode?
   displayTitle       ProfessionalTitle?
-  customDisplayTitle String?             @db.VarChar(40)
+  customDisplayTitle String?            @db.VarChar(40)
   languages          String[]
   portfolioImages    String[]
   isAvailable        Boolean            @default(true)
@@ -363,17 +482,18 @@ model DoctorProfile {
   updatedAt DateTime @updatedAt
 
   // Relaciones
-  user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  workplaces     DoctorClinicWorkplace[]
-  appointments   Appointment[]
-  reviews        Review[]
-  specialties    Specialty[]
-  insurances     Insurance[]
-  assistants     AssistantProfile[]
-  services       Service[]
-  scheduleBlocks ScheduleBlock[]
-  certifications Certification[]
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workplaces         DoctorClinicWorkplace[]
+  appointments       Appointment[]
+  reviews            Review[]
+  specialties        Specialty[]
+  insurances         Insurance[]
+  assistants         AssistantProfile[]
+  services           Service[]
+  scheduleBlocks     ScheduleBlock[]
+  certifications     Certification[]
   patientInvitations PatientInvitation[]
+  professionalAccess ProfessionalAccess?
 
   @@index([isVerified])
   @@index([subscriptionStatus])
@@ -430,19 +550,432 @@ model DoctorClinicWorkplace {
 // 4. ENTIDADES DEL NEGOCIO (CITAS, RESEÑAS Y CATÁLOGOS)
 // ---------------------------------------------------------------------------
 
+model HealthProfession {
+  id                      String   @id @default(uuid())
+  code                    String   @unique @db.VarChar(40)
+  name                    String   @db.VarChar(120)
+  nameNormalized          String   @unique @db.VarChar(120)
+  isActive                Boolean  @default(true)
+  requiresSpecialty       Boolean  @default(false)
+  credentialPolicyVersion Int      @default(1)
+  sortOrder               Int      @default(0)
+  createdAt               DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt               DateTime @updatedAt @db.Timestamptz(3)
+
+  specialties  Specialty[]
+  authorities  RegistrationAuthority[]
+  applications ProfessionalApplication[]
+
+  @@index([isActive, sortOrder])
+}
+
+model RegistrationAuthority {
+  id                 String   @id @default(uuid())
+  countryCode        String   @db.Char(2)
+  registryNamespace  String   @db.VarChar(100)
+  name               String   @db.VarChar(180)
+  nameNormalized     String   @db.VarChar(180)
+  healthProfessionId String?
+  isVerified         Boolean  @default(false)
+  isActive           Boolean  @default(true)
+  sourceReference    String?  @db.VarChar(500)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime @updatedAt @db.Timestamptz(3)
+
+  healthProfession HealthProfession?        @relation(fields: [healthProfessionId], references: [id], onDelete: Restrict)
+  credentials      ProfessionalCredential[]
+
+  @@unique([countryCode, registryNamespace])
+  @@index([countryCode, isActive, nameNormalized])
+  @@index([healthProfessionId])
+}
+
+model Institution {
+  id              String   @id @default(uuid())
+  countryCode     String   @db.Char(2)
+  name            String   @db.VarChar(180)
+  nameNormalized  String   @db.VarChar(180)
+  isVerified      Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  sourceReference String?  @db.VarChar(500)
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+
+  credentials ProfessionalCredential[]
+
+  @@unique([countryCode, nameNormalized])
+  @@index([countryCode, isActive, nameNormalized])
+}
+
+model Language {
+  id             String   @id @default(uuid())
+  code           String   @unique @db.VarChar(16)
+  name           String   @db.VarChar(80)
+  nameNormalized String   @unique @db.VarChar(80)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @db.Timestamptz(3)
+
+  applications ProfessionalApplicationLanguage[]
+
+  @@index([isActive, nameNormalized])
+}
+
 model Specialty {
-  id          String  @id @default(uuid())
-  name        String  @unique
-  description String?
+  id                 String  @id @default(uuid())
+  name               String
+  description        String?
+  healthProfessionId String
+  code               String  @db.VarChar(80)
+  nameNormalized     String  @db.VarChar(160)
+  isActive           Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relaciones
-  doctorProfiles DoctorProfile[]
-  clinicProfiles ClinicProfile[]
+  healthProfession HealthProfession                   @relation(fields: [healthProfessionId], references: [id], onDelete: Restrict)
+  doctorProfiles   DoctorProfile[]
+  clinicProfiles   ClinicProfile[]
+  applications     ProfessionalApplicationSpecialty[]
 
+  @@unique([healthProfessionId, code])
+  @@unique([healthProfessionId, nameNormalized])
   @@index([name])
+  @@index([healthProfessionId, code])
+  @@index([healthProfessionId, isActive, nameNormalized])
+}
+
+model ProfessionalApplication {
+  id                  String                        @id @default(uuid())
+  userId              String
+  cycleNumber         Int
+  status              ProfessionalApplicationStatus @default(DRAFT)
+  healthProfessionId  String?
+  legalGivenNames     String?                       @db.VarChar(160)
+  legalFamilyNames    String?                       @db.VarChar(160)
+  primaryPhoneE164    String?                       @db.VarChar(20)
+  alternatePhoneE164  String?                       @db.VarChar(20)
+  practiceCountryCode String?                       @db.Char(2)
+  publicBio           String?                       @db.VarChar(1000)
+  currentRevision     Int                           @default(1)
+  lastVisitedStep     Int                           @default(1)
+  submittedAt         DateTime?                     @db.Timestamptz(3)
+  decidedAt           DateTime?                     @db.Timestamptz(3)
+  createdAt           DateTime                      @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime                      @updatedAt @db.Timestamptz(3)
+
+  user                 User                                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  healthProfession     HealthProfession?                   @relation(fields: [healthProfessionId], references: [id], onDelete: Restrict)
+  specialties          ProfessionalApplicationSpecialty[]
+  credentials          ProfessionalApplicationCredential[]
+  regulatoryIdentities ProfessionalRegulatoryIdentity[]
+  location             ProfessionalApplicationLocation?
+  languages            ProfessionalApplicationLanguage[]
+  assets               ProfessionalApplicationAsset[]
+  snapshots            ProfessionalApplicationSnapshot[]
+  reviewLogs           ProfessionalApplicationReviewLog[]
+
+  @@unique([userId, cycleNumber])
+  @@index([userId, status])
+  @@index([status, submittedAt, createdAt])
+  @@index([healthProfessionId, status])
+}
+
+model ProfessionalApplicationSpecialty {
+  id            String   @id @default(uuid())
+  applicationId String
+  specialtyId   String
+  isPrimary     Boolean  @default(false)
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  application ProfessionalApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  specialty   Specialty               @relation(fields: [specialtyId], references: [id], onDelete: Restrict)
+
+  @@unique([applicationId, specialtyId])
+  @@index([specialtyId])
+}
+
+model ProfessionalCredential {
+  id                           String                       @id @default(uuid())
+  userId                       String
+  credentialType               ProfessionalCredentialType
+  countryCode                  String                       @db.Char(2)
+  exactTitle                   String                       @db.VarChar(200)
+  institutionId                String?
+  institutionNameSnapshot      String                       @db.VarChar(180)
+  registrationAuthorityId      String?
+  authorityNameSnapshot        String?                      @db.VarChar(180)
+  registrationNumberOriginal   String?                      @db.VarChar(120)
+  registrationNumberNormalized String?                      @db.VarChar(120)
+  issuedAt                     DateTime?                    @db.Date
+  expiresAt                    DateTime?                    @db.Date
+  ownershipStatus              CredentialOwnershipStatus    @default(CLAIMED)
+  verificationStatus           CredentialVerificationStatus @default(UNVERIFIED)
+  verifiedAt                   DateTime?                    @db.Timestamptz(3)
+  verifiedByUserId             String?
+  verificationSource           String?                      @db.VarChar(200)
+  deletedAt                    DateTime?                    @db.Timestamptz(3)
+  createdAt                    DateTime                     @default(now()) @db.Timestamptz(3)
+  updatedAt                    DateTime                     @updatedAt @db.Timestamptz(3)
+
+  user                  User                                @relation("ProfessionalCredentialOwner", fields: [userId], references: [id], onDelete: Restrict)
+  institution           Institution?                        @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  registrationAuthority RegistrationAuthority?              @relation(fields: [registrationAuthorityId], references: [id], onDelete: Restrict)
+  verifiedBy            User?                               @relation("ProfessionalCredentialVerifier", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+  applications          ProfessionalApplicationCredential[]
+  documents             CredentialDocument[]
+
+  @@unique([countryCode, registrationAuthorityId, registrationNumberNormalized], map: "ProfessionalCredential_registry_identity_key")
+  @@index([userId, deletedAt])
+  @@index([registrationAuthorityId, registrationNumberNormalized])
+  @@index([verificationStatus, createdAt])
+}
+
+model ProfessionalApplicationCredential {
+  id            String   @id @default(uuid())
+  applicationId String
+  credentialId  String
+  isPrimary     Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  application ProfessionalApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  credential  ProfessionalCredential  @relation(fields: [credentialId], references: [id], onDelete: Restrict)
+
+  @@unique([applicationId, credentialId])
+  @@index([credentialId])
+}
+
+model CredentialDocument {
+  id              String                 @id @default(uuid())
+  credentialId    String
+  kind            CredentialDocumentKind @default(PRIMARY_EVIDENCE)
+  storageProvider String                 @db.VarChar(40)
+  publicId        String                 @db.VarChar(500)
+  resourceType    String                 @db.VarChar(20)
+  format          String                 @db.VarChar(20)
+  mimeType        String                 @db.VarChar(100)
+  sizeBytes       Int
+  checksumSha256  String                 @db.Char(64)
+  pageCount       Int?
+  scanStatus      DocumentScanStatus     @default(PENDING)
+  scannedAt       DateTime?              @db.Timestamptz(3)
+  deletedAt       DateTime?              @db.Timestamptz(3)
+  createdAt       DateTime               @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime               @updatedAt @db.Timestamptz(3)
+
+  credential ProfessionalCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+
+  @@unique([storageProvider, publicId])
+  @@index([credentialId, deletedAt])
+  @@index([scanStatus, createdAt])
+}
+
+model ProfessionalApplicationLocation {
+  id                  String            @id @default(uuid())
+  applicationId       String            @unique
+  name                String?           @db.VarChar(160)
+  countryCode         String?           @db.Char(2)
+  administrativeArea1 String?           @db.VarChar(120)
+  administrativeArea2 String?           @db.VarChar(120)
+  city                String?           @db.VarChar(120)
+  street1             String?           @db.VarChar(200)
+  street2             String?           @db.VarChar(200)
+  reference           String?           @db.VarChar(300)
+  postalCode          String?           @db.VarChar(20)
+  floorNumber         Int?
+  officeLabel         String?           @db.VarChar(40)
+  instructions        String?           @db.VarChar(500)
+  latitude            Decimal?          @db.Decimal(9, 6)
+  longitude           Decimal?          @db.Decimal(9, 6)
+  locationPrecision   LocationPrecision @default(APPROXIMATE)
+  providerType        String?           @db.VarChar(40)
+  providerPlaceId     String?           @db.VarChar(500)
+  confirmedAt         DateTime?         @db.Timestamptz(3)
+  createdAt           DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime          @updatedAt @db.Timestamptz(3)
+
+  application ProfessionalApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([countryCode, administrativeArea1, city])
+  @@index([latitude, longitude])
+}
+
+model ProfessionalApplicationLanguage {
+  id            String   @id @default(uuid())
+  applicationId String
+  languageId    String
+  proficiency   String?  @db.VarChar(40)
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  application ProfessionalApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  language    Language                @relation(fields: [languageId], references: [id], onDelete: Restrict)
+
+  @@unique([applicationId, languageId])
+  @@index([languageId])
+}
+
+model ProfessionalApplicationAsset {
+  id               String                           @id @default(uuid())
+  applicationId    String
+  category         ApplicationAssetCategory
+  storageProvider  String                           @db.VarChar(40)
+  publicId         String                           @db.VarChar(500)
+  resourceType     String                           @db.VarChar(20)
+  format           String                           @db.VarChar(20)
+  mimeType         String                           @db.VarChar(100)
+  sizeBytes        Int
+  width            Int
+  height           Int
+  checksumSha256   String                           @db.Char(64)
+  sortOrder        Int                              @default(0)
+  moderationStatus ApplicationAssetModerationStatus @default(PENDING)
+  deletedAt        DateTime?                        @db.Timestamptz(3)
+  createdAt        DateTime                         @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime                         @updatedAt @db.Timestamptz(3)
+
+  application ProfessionalApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([storageProvider, publicId])
+  @@index([applicationId, category, sortOrder])
+  @@index([applicationId, deletedAt])
+  @@index([moderationStatus, createdAt])
+}
+
+model ProfessionalApplicationSnapshot {
+  id            String   @id @default(uuid())
+  applicationId String
+  revision      Int
+  schemaVersion Int
+  payload       Json
+  payloadHash   String   @db.Char(64)
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+
+  application        ProfessionalApplication            @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  reviewLogs         ProfessionalApplicationReviewLog[]
+  professionalAccess ProfessionalAccess?
+
+  @@unique([applicationId, revision])
+  @@index([applicationId, createdAt])
+}
+
+model ProfessionalAccess {
+  id                 String                   @id @default(uuid())
+  userId             String                   @unique
+  doctorProfileId    String                   @unique
+  approvedSnapshotId String?                  @unique
+  status             ProfessionalAccessStatus
+  source             ProfessionalAccessSource
+  activatedAt        DateTime                 @db.Timestamptz(3)
+  suspendedAt        DateTime?                @db.Timestamptz(3)
+  revokedAt          DateTime?                @db.Timestamptz(3)
+  reasonCode         String?                  @db.VarChar(80)
+  updatedByUserId    String?
+  version            Int                      @default(1)
+  createdAt          DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime                 @updatedAt @db.Timestamptz(3)
+
+  user             User                             @relation("ProfessionalAccessOwner", fields: [userId], references: [id], onDelete: Restrict)
+  doctorProfile    DoctorProfile                    @relation(fields: [doctorProfileId], references: [id], onDelete: Restrict)
+  approvedSnapshot ProfessionalApplicationSnapshot? @relation(fields: [approvedSnapshotId], references: [id], onDelete: Restrict)
+  updatedBy        User?                            @relation("ProfessionalAccessUpdater", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  auditLogs        ProfessionalAccessAuditLog[]
+
+  @@index([status, createdAt])
+  @@index([updatedByUserId, updatedAt])
+}
+
+model ProfessionalAccessAuditLog {
+  id             String                        @id @default(uuid())
+  accessId       String
+  actorUserId    String?
+  action         ProfessionalAccessAuditAction
+  previousStatus ProfessionalAccessStatus?
+  newStatus      ProfessionalAccessStatus
+  reasonCode     String?                       @db.VarChar(80)
+  internalNote   String?                       @db.VarChar(2000)
+  requestId      String?                       @db.VarChar(120)
+  idempotencyKey String?                       @unique @db.VarChar(120)
+  createdAt      DateTime                      @default(now()) @db.Timestamptz(3)
+
+  access ProfessionalAccess @relation(fields: [accessId], references: [id], onDelete: Restrict)
+  actor  User?              @relation("ProfessionalAccessAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([accessId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([newStatus, createdAt])
+}
+
+model UserRoleAssignment {
+  id         String                   @id @default(uuid())
+  userId     String
+  role       Role
+  scopeKey   String                   @db.VarChar(80)
+  source     UserRoleAssignmentSource
+  sourceId   String?                  @db.VarChar(120)
+  assignedAt DateTime                 @default(now()) @db.Timestamptz(3)
+  revokedAt  DateTime?                @db.Timestamptz(3)
+  createdAt  DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime                 @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, role, scopeKey])
+  @@index([role, scopeKey, revokedAt])
+  @@index([source, sourceId])
+}
+
+model ProfessionalApplicationReviewLog {
+  id               String                              @id @default(uuid())
+  applicationId    String
+  snapshotId       String?
+  actorUserId      String?
+  action           ProfessionalApplicationReviewAction
+  previousStatus   ProfessionalApplicationStatus?
+  newStatus        ProfessionalApplicationStatus
+  reasonCode       String?                             @db.VarChar(80)
+  applicantMessage String?                             @db.VarChar(1000)
+  internalNote     String?                             @db.VarChar(2000)
+  changedSections  Json?
+  idempotencyKey   String?                             @unique @db.VarChar(120)
+  requestId        String?                             @db.VarChar(120)
+  createdAt        DateTime                            @default(now()) @db.Timestamptz(3)
+
+  application ProfessionalApplication          @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  snapshot    ProfessionalApplicationSnapshot? @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+  actor       User?                            @relation("ProfessionalApplicationReviewActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId, createdAt])
+  @@index([newStatus, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model ProfessionalRegulatoryIdentity {
+  id                        String                               @id @default(uuid())
+  userId                    String
+  applicationId             String?
+  countryCode               String                               @db.Char(2)
+  authorityNamespace        String                               @db.VarChar(100)
+  documentType              RegulatoryDocumentType
+  documentNumberCiphertext  String                               @db.Text
+  documentNumberFingerprint String                               @db.Char(64)
+  encryptionKeyVersion      Int
+  normalizationVersion      Int                                  @default(1)
+  verificationStatus        RegulatoryIdentityVerificationStatus @default(UNVERIFIED)
+  verifiedAt                DateTime?                            @db.Timestamptz(3)
+  verifiedByUserId          String?
+  deletedAt                 DateTime?                            @db.Timestamptz(3)
+  createdAt                 DateTime                             @default(now()) @db.Timestamptz(3)
+  updatedAt                 DateTime                             @updatedAt @db.Timestamptz(3)
+
+  user        User                     @relation("RegulatoryIdentityOwner", fields: [userId], references: [id], onDelete: Restrict)
+  application ProfessionalApplication? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  verifiedBy  User?                    @relation("RegulatoryIdentityVerifier", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId, deletedAt])
+  @@index([applicationId])
+  @@index([verificationStatus, createdAt])
 }
 
 model Insurance {
@@ -460,30 +993,30 @@ model Insurance {
 }
 
 model Appointment {
-  id              String @id @default(uuid())
-  patientId       String?
+  id                  String  @id @default(uuid())
+  patientId           String?
   patientInvitationId String?
-  doctorProfileId String
-  clinicProfileId String
-  serviceId       String
+  doctorProfileId     String
+  clinicProfileId     String
+  serviceId           String
 
-  date              DateTime
-  startTime         String
-  endTime           String
-  startDatetime     DateTime?         @db.Timestamptz // Fecha y hora con zona horaria integrada
-  startsAt          DateTime?         @db.Timestamptz(3)
-  endsAt            DateTime?         @db.Timestamptz(3)
-  previousStartsAt  DateTime?         @db.Timestamptz(3)
-  previousEndsAt    DateTime?         @db.Timestamptz(3)
-  cancelledAt       DateTime?         @db.Timestamptz(3)
-  cancelledByUserId String?
-  checkedInAt       DateTime?         @db.Timestamptz(3)
-  startedAt         DateTime?         @db.Timestamptz(3)
-  completedAt       DateTime?         @db.Timestamptz(3)
-  noShowAt          DateTime?         @db.Timestamptz(3)
-  status            AppointmentStatus @default(PENDING)
-  appointmentType   AppointmentType   @default(IN_PERSON)
-  notes             String?
+  date                    DateTime
+  startTime               String
+  endTime                 String
+  startDatetime           DateTime?         @db.Timestamptz // Fecha y hora con zona horaria integrada
+  startsAt                DateTime?         @db.Timestamptz(3)
+  endsAt                  DateTime?         @db.Timestamptz(3)
+  previousStartsAt        DateTime?         @db.Timestamptz(3)
+  previousEndsAt          DateTime?         @db.Timestamptz(3)
+  cancelledAt             DateTime?         @db.Timestamptz(3)
+  cancelledByUserId       String?
+  checkedInAt             DateTime?         @db.Timestamptz(3)
+  startedAt               DateTime?         @db.Timestamptz(3)
+  completedAt             DateTime?         @db.Timestamptz(3)
+  noShowAt                DateTime?         @db.Timestamptz(3)
+  status                  AppointmentStatus @default(PENDING)
+  appointmentType         AppointmentType   @default(IN_PERSON)
+  notes                   String?
   // Immutable enough for agenda/reminders while the invited person has no account.
   invitedPatientFirstName String?
   invitedPatientLastName  String?
@@ -526,15 +1059,15 @@ model Appointment {
   outlookEventId String?
 
   // Relaciones
-  patient       User?                  @relation("PatientAppointments", fields: [patientId], references: [id], onDelete: Restrict)
-  patientInvitation PatientInvitation? @relation(fields: [patientInvitationId], references: [id], onDelete: Restrict)
-  doctorProfile DoctorProfile          @relation(fields: [doctorProfileId], references: [id])
-  clinicProfile ClinicProfile          @relation(fields: [clinicProfileId], references: [id])
-  service       Service                @relation(fields: [serviceId], references: [id])
-  review        Review?
-  changeLogs    AppointmentChangeLog[]
-  turn          AppointmentTurn?
-  cashPayment   Payment?
+  patient           User?                  @relation("PatientAppointments", fields: [patientId], references: [id], onDelete: Restrict)
+  patientInvitation PatientInvitation?     @relation(fields: [patientInvitationId], references: [id], onDelete: Restrict)
+  doctorProfile     DoctorProfile          @relation(fields: [doctorProfileId], references: [id])
+  clinicProfile     ClinicProfile          @relation(fields: [clinicProfileId], references: [id])
+  service           Service                @relation(fields: [serviceId], references: [id])
+  review            Review?
+  changeLogs        AppointmentChangeLog[]
+  turn              AppointmentTurn?
+  cashPayment       Payment?
 
   @@index([patientId])
   @@index([patientInvitationId])
@@ -566,10 +1099,10 @@ model PatientInvitation {
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
 
-  invitedBy    User           @relation("PatientInvitationsCreated", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  invitedBy     User           @relation("PatientInvitationsCreated", fields: [invitedByUserId], references: [id], onDelete: Restrict)
   doctorProfile DoctorProfile? @relation(fields: [doctorProfileId], references: [id], onDelete: SetNull)
   clinicProfile ClinicProfile? @relation(fields: [clinicProfileId], references: [id], onDelete: SetNull)
-  appointments Appointment[]
+  appointments  Appointment[]
 
   @@index([emailNormalized, status])
   @@index([expiresAt])
@@ -726,8 +1259,8 @@ model ScheduleBlock {
   createdAt       DateTime                @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime                @updatedAt @db.Timestamptz(3)
 
-  doctorProfile DoctorProfile  @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
-  clinicProfile ClinicProfile? @relation(fields: [clinicProfileId], references: [id], onDelete: Cascade)
+  doctorProfile DoctorProfile            @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
+  clinicProfile ClinicProfile?           @relation(fields: [clinicProfileId], references: [id], onDelete: Cascade)
   changeLogs    ScheduleBlockChangeLog[]
 
   @@index([doctorProfileId, startsAt])
@@ -736,13 +1269,13 @@ model ScheduleBlock {
 }
 
 model ScheduleBlockChangeLog {
-  id             String                  @id @default(uuid())
+  id              String                  @id @default(uuid())
   scheduleBlockId String
   changedByUserId String
-  changeType     ScheduleBlockChangeType
-  previousValue  Json?
-  newValue       Json?
-  createdAt      DateTime                @default(now())
+  changeType      ScheduleBlockChangeType
+  previousValue   Json?
+  newValue        Json?
+  createdAt       DateTime                @default(now())
 
   scheduleBlock ScheduleBlock @relation(fields: [scheduleBlockId], references: [id], onDelete: Cascade)
 
@@ -775,13 +1308,13 @@ model NotificationOutbox {
 }
 
 model NotificationDelivery {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   outboxId    String
   channel     String
   status      String
   processedAt DateTime? @db.Timestamptz(3)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   outbox NotificationOutbox @relation(fields: [outboxId], references: [id], onDelete: Cascade)
 
@@ -790,7 +1323,7 @@ model NotificationDelivery {
 }
 
 model UserNotification {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
   outboxId  String
   type      String
@@ -798,12 +1331,12 @@ model UserNotification {
   message   String
   data      Json?
   readAt    DateTime? @db.Timestamptz(3)
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, readAt, createdAt])
   @@unique([userId, outboxId])
+  @@index([userId, readAt, createdAt])
 }
 
 model Review {
@@ -854,32 +1387,32 @@ model Service {
 }
 
 model Certification {
-  id               String              @id @default(uuid())
-  title            String              @map("name")
-  institution      String
-  year             Int?
-  credentialNumber String?
-  issuedAt         DateTime?           @db.Date
-  expiresAt        DateTime?           @db.Date
-  documentUrl      String?
-  documentPublicId String?
-  documentMimeType String?
+  id                String              @id @default(uuid())
+  title             String              @map("name")
+  institution       String
+  year              Int?
+  credentialNumber  String?
+  issuedAt          DateTime?           @db.Date
+  expiresAt         DateTime?           @db.Date
+  documentUrl       String?
+  documentPublicId  String?
+  documentMimeType  String?
   documentSizeBytes Int?
-  documentFormat   String?
-  status           CertificationStatus @default(DRAFT)
-  rejectionReason  String?
-  submittedAt      DateTime?           @db.Timestamptz(3)
-  reviewedAt       DateTime?           @db.Timestamptz(3)
-  reviewedByUserId String?
-  deletedAt        DateTime?           @db.Timestamptz(3)
+  documentFormat    String?
+  status            CertificationStatus @default(DRAFT)
+  rejectionReason   String?
+  submittedAt       DateTime?           @db.Timestamptz(3)
+  reviewedAt        DateTime?           @db.Timestamptz(3)
+  reviewedByUserId  String?
+  deletedAt         DateTime?           @db.Timestamptz(3)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   doctorProfileId String
-  doctorProfile   DoctorProfile @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
-  reviewedBy       User?         @relation("CertificationReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
-  auditLogs        CertificationAuditLog[]
+  doctorProfile   DoctorProfile           @relation(fields: [doctorProfileId], references: [id], onDelete: Cascade)
+  reviewedBy      User?                   @relation("CertificationReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  auditLogs       CertificationAuditLog[]
 
   @@index([doctorProfileId, status])
   @@index([reviewedByUserId])
@@ -895,7 +1428,7 @@ model CertificationAuditLog {
   createdAt       DateTime @default(now()) @db.Timestamptz(3)
 
   certification Certification @relation(fields: [certificationId], references: [id], onDelete: Restrict)
-  actor           User?         @relation("CertificationAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actor         User?         @relation("CertificationAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([certificationId, createdAt])
   @@index([actorUserId])

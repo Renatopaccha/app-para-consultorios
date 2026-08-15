@@ -2,9 +2,9 @@ import { Request, Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma';
 import { centsToDollars, dollarsToCents } from '../utils/money';
-import { buildServiceSnapshot } from '../services/serviceSnapshot.service';
+
 import { normalizeEmail } from '../services/emailIdentity.service';
-import bcrypt from 'bcrypt';
+
 import { createAppointment } from '../services/appointmentBooking.service';
 
 export const getDoctors = async (req: Request, res: Response) => {

@@ -16,7 +16,7 @@ import type { NextFunction, Response } from 'express';
 import prisma from '../prisma';
 import { resolveClerkSession } from '../services/clerkSession.service';
 import { getClerkMfaStatus } from '../services/clerkMfa.service';
-import { authenticate, type AuthRequest } from './auth.middleware';
+import { authenticate, requireRole, type AuthRequest } from './auth.middleware';
 import { generateToken } from '../utils/jwt';
 
 const prismaMock = prisma as unknown as { user: { findUnique: jest.Mock } };
@@ -127,5 +127,47 @@ describe('dual authentication adapter', () => {
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(503);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'MFA_STATUS_UNAVAILABLE' }));
+  });
+
+  it('mantiene requireRole legacy fail-open si el resolver shadow falla', async () => {
+    process.env.PROFESSIONAL_AUTH_ENFORCEMENT_MODE = 'shadow';
+    prismaMock.user.findUnique.mockRejectedValue(new Error('shadow database unavailable'));
+    const req = {
+      user: { id: 'zenda-doctor', role: 'DOCTOR' },
+      method: 'GET',
+      baseUrl: '/api/doctors',
+      path: '/me/profile',
+      header: jest.fn().mockReturnValue(undefined),
+    } as unknown as AuthRequest;
+    const res = response();
+    const next = jest.fn();
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await requireRole(['DOCTOR'])(req, res, next);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith('[ProfessionalAuthShadow]', expect.objectContaining({
+      userId: 'zenda-doctor',
+      discrepancyCode: 'SHADOW_RESOLVER_ERROR',
+    }));
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain('shadow database unavailable');
+    errorSpy.mockRestore();
+    delete process.env.PROFESSIONAL_AUTH_ENFORCEMENT_MODE;
+  });
+
+  it.each(['CLINIC_ADMIN', 'ASSISTANT', 'SUPER_ADMIN'] as const)('no exige ProfessionalAccess a %s en un guard mixto', async (role) => {
+    process.env.PROFESSIONAL_AUTH_ENFORCEMENT_MODE = 'enforce';
+    const req = { user: { id: `zenda-${role}`, role } } as AuthRequest;
+    const res = response();
+    const next = jest.fn();
+
+    await requireRole(['DOCTOR', 'CLINIC_ADMIN', 'ASSISTANT', 'SUPER_ADMIN'])(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).not.toHaveBeenCalled();
+    expect(prismaMock.user.findUnique).not.toHaveBeenCalled();
+    delete process.env.PROFESSIONAL_AUTH_ENFORCEMENT_MODE;
   });
 });
