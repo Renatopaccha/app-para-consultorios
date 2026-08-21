@@ -174,7 +174,7 @@ describe('agregado de ProfessionalApplication', () => {
     await prisma.professionalApplicationLocation.create({
       data: {
         applicationId: validApp.id, floorNumber: 0, latitude: -0.180653,
-        longitude: -78.467834, providerType: 'google_places', providerPlaceId: 'test-place',
+        longitude: -78.467834, providerType: 'GOOGLE_PLACES', providerPlaceId: 'test-place',
       },
     });
     expect((await prisma.professionalApplicationLocation.findUniqueOrThrow({ where: { applicationId: validApp.id } })).confirmedAt).toBeNull();

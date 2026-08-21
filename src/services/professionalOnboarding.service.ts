@@ -6,6 +6,7 @@ import {
   LocationPrecision,
 } from '../../generated/prisma';
 import prisma from '../prisma';
+import { normalizeLocationProviderCode } from '../providers/location';
 import type {
   CredentialWriteDto,
   IdentityAutosaveDto,
@@ -431,7 +432,15 @@ export async function autosaveLocation(userId: string, input: LocationAutosaveDt
     if (longitude !== undefined && longitude !== null && (!Number.isFinite(longitude) || longitude < -180 || longitude > 180)) invalid('longitude está fuera de rango.', ['longitude']);
     if (input.floorNumber !== undefined && input.floorNumber !== null && (!Number.isInteger(input.floorNumber) || input.floorNumber < 0)) invalid('floorNumber debe ser 0 o un entero positivo.', ['floorNumber']);
     if (input.locationPrecision !== undefined && !Object.values(LocationPrecision).includes(input.locationPrecision)) invalid('locationPrecision no es válido.', ['locationPrecision']);
-    const providerType = cleanOptionalString(input.providerType, 'providerType', 40);
+    const providerTypeInput = cleanOptionalString(input.providerType, 'providerType', 40);
+    let providerType = providerTypeInput;
+    if (providerTypeInput) {
+      try {
+        providerType = normalizeLocationProviderCode(providerTypeInput);
+      } catch {
+        invalid('providerType no es válido.', ['providerType']);
+      }
+    }
     const providerPlaceId = cleanOptionalString(input.providerPlaceId, 'providerPlaceId', 500);
     if (providerPlaceId && !providerType) invalid('providerType es obligatorio cuando existe providerPlaceId.', ['providerType']);
     const data = {

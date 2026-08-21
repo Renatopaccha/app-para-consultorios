@@ -9,6 +9,7 @@ jest.mock('../../services/clerkMfa.service', () => ({
 }));
 
 import bcrypt from 'bcrypt';
+import { createHmac } from 'crypto';
 import request from 'supertest';
 import app from '../../app';
 import prisma, { disconnectPrisma } from '../../prisma';
@@ -21,6 +22,19 @@ import { assertIntegrationDatabase, clearIntegrationDatabase } from './testDatab
 const clerkSessionMock = jest.mocked(resolveClerkSession);
 const verifiedClerkIdentityMock = jest.mocked(resolveVerifiedClerkIdentity);
 const clerkMfaMock = jest.mocked(getClerkMfaStatus);
+
+function clerkWebhookHeaders(payload: string, secretValue: string, id: string) {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const secret = Buffer.from(secretValue);
+  const signature = createHmac('sha256', secret)
+    .update(`${id}.${timestamp}.${payload}`)
+    .digest('base64');
+  return {
+    'svix-id': id,
+    'svix-timestamp': timestamp,
+    'svix-signature': `v1,${signature}`,
+  };
+}
 
 describe('adaptador Clerk/JWT con PostgreSQL real', () => {
   beforeEach(async () => {
@@ -45,6 +59,54 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
     expect(clerk.body).toMatchObject({ id: user.id, role: 'DOCTOR' });
     expect(JSON.stringify(clerk.body)).not.toContain('clerk-session-token-not-logged');
     expect(clerk.body).not.toHaveProperty('clerkUserId');
+  });
+
+  it('aprovisiona signup Clerk por webhook y permite GET /api/auth/me como PATIENT', async () => {
+    const secretValue = 'zenda-clerk-webhook-integration-secret';
+    process.env.CLERK_WEBHOOK_SIGNING_SECRET = `whsec_${Buffer.from(secretValue).toString('base64')}`;
+    const payload = JSON.stringify({
+      type: 'user.created',
+      object: 'event',
+      data: {
+        id: 'user_clerk_new_patient',
+        primary_email_address_id: 'idn_new_patient',
+        email_addresses: [{
+          id: 'idn_new_patient',
+          email_address: 'New.Clerk.Patient@zenda.test',
+          verification: { status: 'verified' },
+        }],
+        public_metadata: { role: 'DOCTOR' },
+      },
+    });
+
+    await request(app)
+      .post('/api/webhooks/clerk')
+      .set('Content-Type', 'application/json')
+      .set(clerkWebhookHeaders(payload, secretValue, 'msg_new_patient'))
+      .send(payload)
+      .expect(200, { received: true, created: true });
+
+    await request(app)
+      .post('/api/webhooks/clerk')
+      .set('Content-Type', 'application/json')
+      .set(clerkWebhookHeaders(payload, secretValue, 'msg_new_patient_retry'))
+      .send(payload)
+      .expect(200, { received: true, duplicate: true });
+
+    expect(await prisma.user.count({ where: { clerkUserId: 'user_clerk_new_patient' } })).toBe(1);
+    expect(await prisma.user.findUniqueOrThrow({ where: { clerkUserId: 'user_clerk_new_patient' } })).toMatchObject({
+      email: 'new.clerk.patient@zenda.test',
+      emailNormalized: 'new.clerk.patient@zenda.test',
+      role: 'PATIENT',
+    });
+
+    clerkSessionMock.mockReturnValue({ clerkUserId: 'user_clerk_new_patient', sessionId: 'sess_new_patient' });
+    const me = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', 'Bearer clerk-session-token-not-logged')
+      .expect(200);
+    expect(me.body).toMatchObject({ email: 'new.clerk.patient@zenda.test', role: 'PATIENT' });
+    delete process.env.CLERK_WEBHOOK_SIGNING_SECRET;
   });
 
   it('permite que el mismo doctor enlazado cargue las rutas de lectura iniciales del panel con Clerk', async () => {
@@ -198,7 +260,7 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
     const profile = await prisma.doctorProfile.create({ data: { userId: user.id, licenseNumber: 'LINK-DOCTOR-001', consultationPrice: 50 } });
     verifiedClerkIdentityMock.mockResolvedValue({ clerkUserId: 'user_link_doctor', sessionId: 'sess_link_doctor', email: 'Link.Doctor@Zenda.test' });
 
-    const response = await request(app).post('/api/auth/clerk/link-existing-account').set('Authorization', 'Bearer clerk-session-token-not-logged').send({ password: 'test-link-password' }).expect(200);
+    const response = await request(app).post('/api/auth/clerk/link-existing-account').set('Authorization', 'Bearer clerk-session-token-not-logged').send({ password: 'test-link-password', portal: 'professional' }).expect(200);
     expect(response.body).toEqual({ linked: true, alreadyLinked: false, user: { id: user.id, role: 'DOCTOR' } });
 
     const linkedUser = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
@@ -217,7 +279,7 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
     const user = await prisma.user.create({ data: { email: 'wrong.password@zenda.test', emailNormalized: 'wrong.password@zenda.test', firstName: 'Wrong', lastName: 'Password', passwordHash, role: 'DOCTOR' } });
     verifiedClerkIdentityMock.mockResolvedValue({ clerkUserId: 'user_wrong_password', sessionId: 'sess_wrong_password', email: user.email });
 
-    const response = await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'not-the-password' }).expect(401);
+    const response = await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'not-the-password', portal: 'professional' }).expect(401);
     expect(response.body).toMatchObject({ code: 'LINK_REAUTH_FAILED' });
     expect(JSON.stringify(response.body)).not.toContain('not-the-password');
     expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).clerkUserId).toBeNull();
@@ -229,14 +291,14 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
     const existing = await prisma.user.create({ data: { email: 'existing.email@zenda.test', emailNormalized: 'existing.email@zenda.test', firstName: 'Existing', lastName: 'Email', passwordHash, role: 'DOCTOR' } });
     const existingProfile = await prisma.doctorProfile.create({ data: { userId: existing.id, licenseNumber: 'NO-AUTO-LINK-001', consultationPrice: 50 } });
     verifiedClerkIdentityMock.mockResolvedValue({ clerkUserId: 'user_different_email', sessionId: 'sess_different_email', email: 'different.email@zenda.test' });
-    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'known-password' }).expect(401).expect(({ body }) => expect(body.code).toBe('LINK_REAUTH_FAILED'));
+    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'known-password', portal: 'professional' }).expect(401).expect(({ body }) => expect(body.code).toBe('LINK_REAUTH_FAILED'));
     expect(await prisma.user.count()).toBe(1);
     expect(await prisma.user.findUniqueOrThrow({ where: { id: existing.id } })).toMatchObject({ clerkUserId: null });
     expect(await prisma.doctorProfile.count()).toBe(1);
     expect(await prisma.doctorProfile.findUniqueOrThrow({ where: { id: existingProfile.id } })).toMatchObject({ userId: existing.id });
 
     verifiedClerkIdentityMock.mockResolvedValue(null);
-    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'known-password' }).expect(401).expect(({ body }) => expect(body.code).toBe('CLERK_VERIFIED_SESSION_REQUIRED'));
+    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'known-password', portal: 'professional' }).expect(401).expect(({ body }) => expect(body.code).toBe('CLERK_VERIFIED_SESSION_REQUIRED'));
     expect(await prisma.user.count()).toBe(1);
   });
 
@@ -244,17 +306,17 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
     const passwordHash = await bcrypt.hash('collision-password', 4);
     const user = await prisma.user.create({ data: { email: 'collision.owner@zenda.test', emailNormalized: 'collision.owner@zenda.test', firstName: 'Collision', lastName: 'Owner', passwordHash, role: 'DOCTOR', clerkUserId: 'user_same_link' } });
     verifiedClerkIdentityMock.mockResolvedValue({ clerkUserId: 'user_same_link', sessionId: 'sess_same_link', email: user.email });
-    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'collision-password' }).expect(200).expect(({ body }) => expect(body).toMatchObject({ linked: true, alreadyLinked: true, user: { id: user.id } }));
+    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'collision-password', portal: 'professional' }).expect(200).expect(({ body }) => expect(body).toMatchObject({ linked: true, alreadyLinked: true, user: { id: user.id } }));
     expect(await prisma.authIdentityLinkAudit.count({ where: { userId: user.id, event: 'LINKED' } })).toBe(0);
 
     await prisma.user.create({ data: { email: 'collision.other@zenda.test', emailNormalized: 'collision.other@zenda.test', firstName: 'Collision', lastName: 'Other', passwordHash, role: 'PATIENT', clerkUserId: 'user_owned_elsewhere' } });
     const target = await prisma.user.create({ data: { email: 'collision.target@zenda.test', emailNormalized: 'collision.target@zenda.test', firstName: 'Collision', lastName: 'Target', passwordHash, role: 'DOCTOR' } });
     verifiedClerkIdentityMock.mockResolvedValue({ clerkUserId: 'user_owned_elsewhere', sessionId: 'sess_owned_elsewhere', email: target.email });
-    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'collision-password' }).expect(409).expect(({ body }) => expect(body.code).toBe('CLERK_IDENTITY_LINK_CONFLICT'));
+    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'collision-password', portal: 'professional' }).expect(409).expect(({ body }) => expect(body.code).toBe('CLERK_IDENTITY_LINK_CONFLICT'));
     expect(await prisma.authIdentityLinkAudit.count({ where: { userId: target.id, clerkUserId: 'user_owned_elsewhere', event: 'COLLISION' } })).toBe(1);
 
     verifiedClerkIdentityMock.mockResolvedValue({ clerkUserId: 'user_new_clerk_identity', sessionId: 'sess_new_clerk_identity', email: user.email });
-    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'collision-password' }).expect(409);
+    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'collision-password', portal: 'professional' }).expect(409);
     expect(await prisma.authIdentityLinkAudit.count({ where: { userId: user.id, clerkUserId: 'user_new_clerk_identity', event: 'COLLISION' } })).toBe(1);
   });
 
@@ -264,8 +326,8 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
     verifiedClerkIdentityMock.mockResolvedValue({ clerkUserId: 'user_concurrent_link', sessionId: 'sess_concurrent_link', email: user.email });
 
     const responses = await Promise.all([
-      request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'concurrent-password' }),
-      request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'concurrent-password' }),
+      request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'concurrent-password', portal: 'professional' }),
+      request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'concurrent-password', portal: 'professional' }),
     ]);
     expect(responses.map((response) => response.status).sort()).toEqual([200, 200]);
     expect(await prisma.user.count({ where: { clerkUserId: 'user_concurrent_link' } })).toBe(1);
@@ -273,9 +335,9 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
   });
 
   it('requires a verified Clerk session and never accepts a Clerk ID from the body', async () => {
-    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'some-password' }).expect(401);
+    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'some-password', portal: 'professional' }).expect(401);
     verifiedClerkIdentityMock.mockResolvedValue({ clerkUserId: 'user_real_identity', sessionId: 'sess_real_identity', email: 'nobody@zenda.test' });
-    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'some-password', clerkUserId: 'user_attacker_controlled' }).expect(400);
+    await request(app).post('/api/auth/clerk/link-existing-account').send({ password: 'some-password', portal: 'professional', clerkUserId: 'user_attacker_controlled' }).expect(400);
     expect(await prisma.user.count({ where: { clerkUserId: 'user_attacker_controlled' } })).toBe(0);
   });
 });

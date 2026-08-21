@@ -148,8 +148,15 @@ export const login = async (req: Request, res: Response) => {
  */
 export const linkExistingClerkAccount = async (req: Request, res: Response) => {
   const password = req.body?.password;
-  const invalidBody = !req.body || typeof password !== 'string' || !password || Object.keys(req.body).some((key) => key !== 'password');
-  if (invalidBody) return res.status(400).json({ error: 'La contraseña es requerida.', code: 'LINK_PASSWORD_REQUIRED' });
+  if (!req.body || typeof password !== 'string' || !password) {
+    return res.status(400).json({ error: 'La contraseña es requerida.', code: 'LINK_PASSWORD_REQUIRED' });
+  }
+
+  const portal = req.body.portal;
+  const hasUnknownFields = Object.keys(req.body).some((key) => key !== 'password' && key !== 'portal');
+  if (hasUnknownFields || !isRequestedPortal(portal)) {
+    return res.status(400).json({ error: 'El portal solicitado no es válido.', code: 'LINK_PORTAL_INVALID' });
+  }
 
   let clerkIdentity;
   try {
@@ -170,6 +177,11 @@ export const linkExistingClerkAccount = async (req: Request, res: Response) => {
   if (!passwordIsValid) {
     await recordIdentityLinkAudit({ userId: user.id, actorUserId: user.id, clerkUserId: clerkIdentity.clerkUserId, event: AuthIdentityLinkEvent.LINK_REJECTED, reasonCode: 'LINK_REAUTH_FAILED' });
     return res.status(401).json({ error: 'No fue posible verificar la cuenta Zenda para el enlace.', code: 'LINK_REAUTH_FAILED' });
+  }
+
+  if (!resolvePortalForRole(user.role, portal)) {
+    await recordIdentityLinkAudit({ userId: user.id, actorUserId: user.id, clerkUserId: clerkIdentity.clerkUserId, event: AuthIdentityLinkEvent.LINK_REJECTED, reasonCode: 'PORTAL_ROLE_MISMATCH' });
+    return res.status(403).json({ error: 'Esta cuenta no corresponde al portal solicitado.', code: 'PORTAL_ROLE_MISMATCH' });
   }
 
   try {

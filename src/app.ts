@@ -24,6 +24,7 @@ import cashPaymentRoutes from './routes/cashPayment.routes';
 import financeRoutes from './routes/finance.routes';
 import notificationRoutes from './routes/notification.routes';
 import professionalOnboardingRoutes from './routes/professionalOnboarding.routes';
+import clerkWebhookRoutes from './routes/clerkWebhook.routes';
 import { clerkSessionMiddleware } from './services/clerkSession.service';
 import { assertProfessionalAuthConfiguration } from './config/professionalAuthorization';
 
@@ -44,6 +45,9 @@ const allowedOrigins = (process.env.CORS_ORIGIN || '')
 // Middlewares globales
 app.use(helmet());
 app.use(cors({ origin: allowedOrigins.length > 0 ? allowedOrigins : false }));
+// Clerk signs the exact request bytes. Mount this public, signature-protected
+// route before express.json() so only this endpoint receives a raw Buffer.
+app.use('/api/webhooks/clerk', express.raw({ type: 'application/json', limit: '256kb' }), clerkWebhookRoutes);
 app.use(express.json({ limit: '1mb' }));
 // Optional while legacy JWT and Clerk coexist. When Clerk is configured, this
 // verifies its session before Zenda maps it to the internal UUID.
