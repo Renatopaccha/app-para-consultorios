@@ -97,20 +97,20 @@ describe('cutover ProfessionalAccess en modo enforce', () => {
 
     const portal = await request(app).post('/api/auth/resolve-portal')
       .set('Authorization', `Bearer ${actor.token}`).send({ portal: 'professional' }).expect(200);
-    expect(portal.body).toEqual({ portal: 'professional', allowed: true, destination: '/dashboard' });
+    expect(portal.body).toEqual({ portal: 'professional', allowed: true, action: 'DASHBOARD', redirectTo: '/dashboard' });
     expect(await prisma.user.findUniqueOrThrow({ where: { id: actor.user.id } })).toMatchObject({ id: actor.user.id, role: 'DOCTOR' });
     expect(await prisma.doctorProfile.findUniqueOrThrow({ where: { id: actor.doctor.id } })).toMatchObject({ id: actor.doctor.id, userId: actor.user.id });
   });
 
-  it('PENDING accidental DOCTOR recibe 403 también en rutas authenticate-only y no obtiene dashboard', async () => {
+  it('PENDING accidental DOCTOR recibe 403 en APIs reales pero el portal dirige al estado', async () => {
     const actor = await doctorFixture({ access: null, assignment: null, application: 'PENDING_REVIEW' });
     for (const path of ['/api/doctors/me/profile', '/api/schedule-blocks', '/api/bookings', '/api/turns/today']) {
       await request(app).get(path).set('Authorization', `Bearer ${actor.token}`).expect(403)
         .expect(({ body }) => expect(body.code).toBe('PROFESSIONAL_ACCESS_REQUIRED'));
     }
     await request(app).post('/api/auth/resolve-portal')
-      .set('Authorization', `Bearer ${actor.token}`).send({ portal: 'professional' }).expect(403)
-      .expect(({ body }) => expect(body).toMatchObject({ code: 'PROFESSIONAL_ACCESS_REQUIRED', requestedPortal: 'professional' }));
+      .set('Authorization', `Bearer ${actor.token}`).send({ portal: 'professional' }).expect(200)
+      .expect(({ body }) => expect(body).toEqual({ portal: 'professional', allowed: true, action: 'ONBOARDING_STATUS', redirectTo: '/registro-profesional/estado' }));
   });
 
   it.each([
@@ -120,6 +120,9 @@ describe('cutover ProfessionalAccess en modo enforce', () => {
     const actor = await doctorFixture({ access: status, assignment: 'ACTIVE', application: 'APPROVED' });
     await request(app).get('/api/doctors/me/profile').set('Authorization', `Bearer ${actor.token}`).expect(403)
       .expect(({ body }) => expect(body.code).toBe(code));
+    await request(app).post('/api/auth/resolve-portal').set('Authorization', `Bearer ${actor.token}`)
+      .send({ portal: 'professional' }).expect(200)
+      .expect(({ body }) => expect(body).toEqual({ portal: 'professional', allowed: false, action: 'ACCESS_DENIED', redirectTo: null, code }));
     expect(await prisma.user.findUniqueOrThrow({ where: { id: actor.user.id } })).toMatchObject({ role: 'DOCTOR' });
     expect(await prisma.doctorProfile.findUniqueOrThrow({ where: { id: actor.doctor.id } })).toMatchObject({ userId: actor.user.id });
     expect(await prisma.userRoleAssignment.findUniqueOrThrow({

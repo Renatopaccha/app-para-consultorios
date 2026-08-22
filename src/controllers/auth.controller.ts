@@ -13,7 +13,7 @@ import { linkClerkIdentity, recordIdentityLinkAudit, AuthIdentityLinkError } fro
 import { resolveVerifiedClerkIdentity } from '../services/clerkSession.service';
 import { verifyLegacyPassword } from '../services/legacyCredential.service';
 import { availablePortalsForRole, isRequestedPortal, resolvePortalForRole } from '../services/portalAccess.service';
-import { authorizeProfessionalRequest } from '../services/professionalAuthorizationEnforcement.service';
+import { resolveProfessionalPortal } from '../services/professionalPortalResolution.service';
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -272,23 +272,22 @@ export const resolvePortal = async (req: AuthRequest, res: Response) => {
     });
   }
 
-  const resolution = resolvePortalForRole(req.user.role, body.portal);
-  if (body.portal === 'professional' && req.user.role === 'DOCTOR') {
-    const authorization = await authorizeProfessionalRequest({
-      req,
-      userId: req.user.id,
-      currentRole: req.user.role,
-      capability: 'PORTAL professional',
-    });
-    if (!authorization.allowed) {
-      return res.status(authorization.status).json({
-        error: authorization.code,
-        code: authorization.code,
-        message: authorization.message,
-        requestedPortal: body.portal,
+  if (body.portal === 'professional') {
+    try {
+      const resolution = await resolveProfessionalPortal(prisma, {
+        userId: req.user.id,
+        currentRole: req.user.role,
+      });
+      return res.status(200).json({ portal: body.portal, ...resolution });
+    } catch {
+      return res.status(503).json({
+        error: 'No fue posible resolver el acceso profesional.',
+        code: 'PROFESSIONAL_PORTAL_RESOLUTION_UNAVAILABLE',
       });
     }
   }
+
+  const resolution = resolvePortalForRole(req.user.role, body.portal);
   if (!resolution) {
     return res.status(403).json({
       error: 'Esta cuenta no tiene acceso al espacio solicitado.',
@@ -298,7 +297,7 @@ export const resolvePortal = async (req: AuthRequest, res: Response) => {
     });
   }
 
-  return res.status(200).json(resolution);
+  return res.status(200).json({ ...resolution, action: 'DASHBOARD', redirectTo: resolution.destination });
 };
 
 /**

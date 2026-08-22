@@ -140,7 +140,6 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
   });
 
   it.each([
-    ['DOCTOR', 'professional', '/dashboard'],
     ['CLINIC_ADMIN', 'clinic', '/portal/clinica'],
     ['ASSISTANT', 'assistant', '/portal/asistente'],
   ] as const)('resuelve el portal %s para el rol %s desde PostgreSQL', async (role, portal, destination) => {
@@ -153,7 +152,20 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
       .send({ portal })
       .expect(200);
 
-    expect(response.body).toEqual({ portal, allowed: true, destination });
+    expect(response.body).toEqual({ portal, allowed: true, destination, action: 'DASHBOARD', redirectTo: destination });
+  });
+
+  it('resuelve dashboard profesional solo con acceso ACTIVE y asignación DOCTOR GLOBAL', async () => {
+    const user = await prisma.user.create({ data: { email: 'doctor-portal@zenda.test', emailNormalized: 'doctor-portal@zenda.test', firstName: 'Portal', lastName: 'Doctor', role: 'DOCTOR' } });
+    const doctorProfile = await prisma.doctorProfile.create({ data: { userId: user.id, licenseNumber: 'PORTAL-ACTIVE-1', consultationPrice: 50 } });
+    await prisma.userRoleAssignment.create({ data: { userId: user.id, role: 'DOCTOR', scopeKey: 'GLOBAL', source: 'LEGACY_BACKFILL' } });
+    await prisma.professionalAccess.create({ data: { userId: user.id, doctorProfileId: doctorProfile.id, status: 'ACTIVE', source: 'LEGACY_BACKFILL', activatedAt: new Date() } });
+
+    const response = await request(app).post('/api/auth/resolve-portal')
+      .set('Authorization', `Bearer ${generateToken({ id: user.id, role: 'PATIENT' })}`)
+      .send({ portal: 'professional' }).expect(200);
+
+    expect(response.body).toEqual({ portal: 'professional', allowed: true, action: 'DASHBOARD', redirectTo: '/dashboard' });
   });
 
   it('rechaza los demás portales para DOCTOR y devuelve solamente los portales derivados del rol', async () => {
@@ -166,7 +178,7 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
     }
   });
 
-  it.each(['professional', 'clinic', 'assistant'] as const)('rechaza el portal %s para PATIENT y SUPER_ADMIN sin acceso implícito', async (portal) => {
+  it.each(['clinic', 'assistant'] as const)('rechaza el portal %s para PATIENT y SUPER_ADMIN sin acceso implícito', async (portal) => {
     const [patient, superAdmin] = await Promise.all([
       prisma.user.create({ data: { email: `patient-${portal}@zenda.test`, emailNormalized: `patient-${portal}@zenda.test`, firstName: 'Patient', lastName: portal, passwordHash: 'legacy-hash', role: 'PATIENT' } }),
       prisma.user.create({ data: { email: `super-${portal}@zenda.test`, emailNormalized: `super-${portal}@zenda.test`, firstName: 'Super', lastName: portal, passwordHash: 'legacy-hash', role: 'SUPER_ADMIN' } }),
@@ -176,6 +188,30 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
       const response = await request(app).post('/api/auth/resolve-portal').set('Authorization', `Bearer ${generateToken({ id: user.id, role: user.role })}`).send({ portal }).expect(403);
       expect(response.body).toEqual(expect.objectContaining({ code: 'PORTAL_ACCESS_DENIED', requestedPortal: portal, availablePortals: [] }));
     }
+  });
+
+  it('dirige PATIENT sin solicitud al inicio de onboarding profesional', async () => {
+    const patient = await prisma.user.create({ data: { email: 'patient-professional@zenda.test', emailNormalized: 'patient-professional@zenda.test', firstName: 'Patient', lastName: 'Professional', role: 'PATIENT' } });
+
+    const response = await request(app).post('/api/auth/resolve-portal')
+      .set('Authorization', `Bearer ${generateToken({ id: patient.id, role: patient.role })}`)
+      .send({ portal: 'professional' }).expect(200);
+
+    expect(response.body).toEqual({ portal: 'professional', allowed: true, action: 'ONBOARDING_WIZARD', redirectTo: '/registro-profesional' });
+  });
+
+  it.each([
+    ['DRAFT', 3, 'ONBOARDING_WIZARD', '/registro-profesional/paso/3'],
+    ['PENDING_REVIEW', 5, 'ONBOARDING_STATUS', '/registro-profesional/estado'],
+  ] as const)('dirige solicitud %s al destino de onboarding correspondiente', async (status, lastVisitedStep, action, redirectTo) => {
+    const patient = await prisma.user.create({ data: { email: `patient-${status.toLowerCase()}@zenda.test`, emailNormalized: `patient-${status.toLowerCase()}@zenda.test`, firstName: 'Patient', lastName: status, role: 'PATIENT' } });
+    await prisma.professionalApplication.create({ data: { userId: patient.id, cycleNumber: 1, status, lastVisitedStep } });
+
+    const response = await request(app).post('/api/auth/resolve-portal')
+      .set('Authorization', `Bearer ${generateToken({ id: patient.id, role: patient.role })}`)
+      .send({ portal: 'professional' }).expect(200);
+
+    expect(response.body).toEqual({ portal: 'professional', allowed: true, action, redirectTo });
   });
 
   it('ignora query roles y rechaza cuerpos manipulados sin modificar el rol del usuario', async () => {

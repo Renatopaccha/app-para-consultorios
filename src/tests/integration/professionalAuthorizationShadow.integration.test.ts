@@ -107,7 +107,7 @@ describe('shadow authorization profesional con PostgreSQL real', () => {
     infoSpy.mockRestore();
   });
 
-  it('PENDING_REVIEW demuestra allow legacy / deny nuevo sin cambiar HTTP ni portal', async () => {
+  it('PENDING_REVIEW conserva shadow en APIs pero el portal dirige al estado de onboarding', async () => {
     const actor = await createDoctorFixture({
       verificationStatus: 'PENDING', applicationStatus: 'PENDING_REVIEW', accessStatus: null, assignment: null,
     });
@@ -119,7 +119,7 @@ describe('shadow authorization profesional con PostgreSQL real', () => {
       .set('Authorization', `Bearer ${actor.token}`).send({ portal: 'professional' }).expect(200);
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(portal.body).toEqual({ portal: 'professional', allowed: true, destination: '/dashboard' });
+    expect(portal.body).toEqual({ portal: 'professional', allowed: true, action: 'ONBOARDING_STATUS', redirectTo: '/registro-profesional/estado' });
     await expect(resolveProfessionalAuthorization(prisma, {
       userId: actor.user.id, currentRole: 'DOCTOR',
     })).resolves.toEqual(expect.objectContaining({
