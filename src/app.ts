@@ -1,4 +1,6 @@
-import 'newrelic';
+if (process.env.NODE_ENV !== 'test') {
+  require('newrelic');
+}
 import express, { Application, ErrorRequestHandler, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
