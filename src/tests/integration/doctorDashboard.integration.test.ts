@@ -6,8 +6,8 @@ import { localDate, localDateTimeToUtc } from '../../utils/scheduling';
 import { assertIntegrationDatabase, clearIntegrationDatabase } from './testDatabase';
 
 describe('dashboard real del doctor con PostgreSQL', () => {
-  beforeEach(async () => { assertIntegrationDatabase(); await clearIntegrationDatabase(); });
-  afterAll(async () => { await clearIntegrationDatabase(); await disconnectPrisma(); });
+  beforeEach(async () => { assertIntegrationDatabase(); await clearIntegrationDatabase(); jest.useFakeTimers({ now: new Date(new Date().setHours(12, 0, 0, 0)), doNotFake: ['setTimeout', 'setInterval', 'setImmediate', 'clearTimeout', 'clearInterval', 'nextTick'] }); });
+  afterAll(async () => { jest.useRealTimers(); await clearIntegrationDatabase(); await disconnectPrisma(); });
 
   it('agrega solo datos propios, respeta sede y calcula dinero/bloqueos/notificaciones', async () => {
     const users = await Promise.all([

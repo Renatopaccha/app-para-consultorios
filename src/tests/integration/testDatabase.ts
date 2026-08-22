@@ -8,17 +8,25 @@ export function assertIntegrationDatabase(): string {
 }
 
 /**
- * Deletes test fixtures only. It never creates, drops or resets a database.
+ * Clears test fixtures only. It never creates, drops or resets a database.
  * The migration lifecycle is owned by db:test:migrate.
  */
 export async function clearIntegrationDatabase(): Promise<void> {
   assertIntegrationDatabase();
+  // DELETE is intentionally rejected for append-only history. TRUNCATE does
+  // not invoke row DELETE triggers and is confined by the test-DB assertion.
+  await prisma.$executeRawUnsafe(`
+    TRUNCATE TABLE
+      "ProfessionalAccessAuditLog",
+      "ProfessionalAccess",
+      "ProfessionalEvidenceRetentionEvent",
+      "ProfessionalEvidenceRetention",
+      "ProfessionalApplicationCredentialDocumentEvidence",
+      "ProfessionalApplicationReviewLog",
+      "ProfessionalApplicationSnapshot"
+  `);
   await prisma.$transaction([
-    prisma.professionalAccessAuditLog.deleteMany(),
-    prisma.professionalAccess.deleteMany(),
     prisma.userRoleAssignment.deleteMany(),
-    prisma.professionalApplicationReviewLog.deleteMany(),
-    prisma.professionalApplicationSnapshot.deleteMany(),
     prisma.professionalRegulatoryIdentity.deleteMany(),
     prisma.professionalApplicationAsset.deleteMany(),
     prisma.professionalApplicationLanguage.deleteMany(),

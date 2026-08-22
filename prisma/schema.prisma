@@ -222,6 +222,37 @@ enum DocumentScanStatus {
   ERROR
 }
 
+enum ProfessionalEvidenceCaptureSource {
+  LIVE_SUBMIT
+  BACKFILL_V1
+}
+
+enum ProfessionalEvidenceRetentionStatus {
+  HELD
+  RELEASE_ELIGIBLE
+  RELEASED
+}
+
+enum ProfessionalEvidenceBinaryStatus {
+  PRESENT
+  UNKNOWN
+  MISSING
+  PURGE_PENDING
+  PURGED
+  PURGE_FAILED
+}
+
+enum ProfessionalEvidenceRetentionAction {
+  HOLD_CREATED
+  DELETE_REQUESTED
+  MARKED_RELEASE_ELIGIBLE
+  HOLD_RELEASED
+  BINARY_MARKED_MISSING
+  PURGE_SCHEDULED
+  PURGE_SUCCEEDED
+  PURGE_FAILED
+}
+
 enum ApplicationAssetCategory {
   AVATAR
   PRACTICE_INTERIOR
@@ -330,30 +361,32 @@ model User {
   assistantProfile AssistantProfile?
 
   // Relaciones
-  appointmentsAsPatient          Appointment[]                      @relation("PatientAppointments")
-  reviewsGiven                   Review[]                           @relation("PatientReviews")
-  securityLogs                   SecurityLog[]
-  invitationsCreated             Invitation[]                       @relation("InvitationsCreated")
-  patientInvitationsCreated      PatientInvitation[]                @relation("PatientInvitationsCreated")
-  paymentsConfirmed              Payment[]                          @relation("PaymentConfirmedBy")
-  paymentEvents                  PaymentEvent[]                     @relation("PaymentEventActor")
-  paymentIdempotencyKeys         PaymentIdempotencyKey[]
-  paymentVerificationAttempts    PaymentVerificationAttempt[]       @relation("PaymentAttemptActor")
-  notifications                  UserNotification[]
-  certificationsReviewed         Certification[]                    @relation("CertificationReviewer")
-  certificationAuditEvents       CertificationAuditLog[]            @relation("CertificationAuditActor")
-  identityLinkAudits             AuthIdentityLinkAudit[]            @relation("AuthIdentityLinkTarget")
-  identityLinkActions            AuthIdentityLinkAudit[]            @relation("AuthIdentityLinkActor")
-  professionalApplications       ProfessionalApplication[]
-  professionalCredentials        ProfessionalCredential[]           @relation("ProfessionalCredentialOwner")
-  credentialsVerified            ProfessionalCredential[]           @relation("ProfessionalCredentialVerifier")
-  professionalReviewActions      ProfessionalApplicationReviewLog[] @relation("ProfessionalApplicationReviewActor")
-  regulatoryIdentities           ProfessionalRegulatoryIdentity[]   @relation("RegulatoryIdentityOwner")
-  regulatoryIdentitiesVerified   ProfessionalRegulatoryIdentity[]   @relation("RegulatoryIdentityVerifier")
-  professionalAccess             ProfessionalAccess?                @relation("ProfessionalAccessOwner")
-  professionalAccessUpdates      ProfessionalAccess[]               @relation("ProfessionalAccessUpdater")
-  professionalAccessAuditActions ProfessionalAccessAuditLog[]       @relation("ProfessionalAccessAuditActor")
-  roleAssignments                UserRoleAssignment[]
+  appointmentsAsPatient                Appointment[]                        @relation("PatientAppointments")
+  reviewsGiven                         Review[]                             @relation("PatientReviews")
+  securityLogs                         SecurityLog[]
+  invitationsCreated                   Invitation[]                         @relation("InvitationsCreated")
+  patientInvitationsCreated            PatientInvitation[]                  @relation("PatientInvitationsCreated")
+  paymentsConfirmed                    Payment[]                            @relation("PaymentConfirmedBy")
+  paymentEvents                        PaymentEvent[]                       @relation("PaymentEventActor")
+  paymentIdempotencyKeys               PaymentIdempotencyKey[]
+  paymentVerificationAttempts          PaymentVerificationAttempt[]         @relation("PaymentAttemptActor")
+  notifications                        UserNotification[]
+  certificationsReviewed               Certification[]                      @relation("CertificationReviewer")
+  certificationAuditEvents             CertificationAuditLog[]              @relation("CertificationAuditActor")
+  identityLinkAudits                   AuthIdentityLinkAudit[]              @relation("AuthIdentityLinkTarget")
+  identityLinkActions                  AuthIdentityLinkAudit[]              @relation("AuthIdentityLinkActor")
+  professionalApplications             ProfessionalApplication[]
+  professionalCredentials              ProfessionalCredential[]             @relation("ProfessionalCredentialOwner")
+  credentialsVerified                  ProfessionalCredential[]             @relation("ProfessionalCredentialVerifier")
+  professionalReviewActions            ProfessionalApplicationReviewLog[]   @relation("ProfessionalApplicationReviewActor")
+  regulatoryIdentities                 ProfessionalRegulatoryIdentity[]     @relation("RegulatoryIdentityOwner")
+  regulatoryIdentitiesVerified         ProfessionalRegulatoryIdentity[]     @relation("RegulatoryIdentityVerifier")
+  professionalAccess                   ProfessionalAccess?                  @relation("ProfessionalAccessOwner")
+  professionalAccessUpdates            ProfessionalAccess[]                 @relation("ProfessionalAccessUpdater")
+  professionalAccessAuditActions       ProfessionalAccessAuditLog[]         @relation("ProfessionalAccessAuditActor")
+  professionalEvidenceRetentionUpdates ProfessionalEvidenceRetention[]      @relation("ProfessionalEvidenceRetentionUpdater")
+  professionalEvidenceRetentionActions ProfessionalEvidenceRetentionEvent[] @relation("ProfessionalEvidenceRetentionActor")
+  roleAssignments                      UserRoleAssignment[]
 
   @@index([email])
   @@index([resetPasswordToken])
@@ -665,8 +698,8 @@ model ProfessionalApplication {
   createdAt           DateTime                      @default(now()) @db.Timestamptz(3)
   updatedAt           DateTime                      @updatedAt @db.Timestamptz(3)
 
-  user                 User                                @relation(fields: [userId], references: [id], onDelete: Restrict)
-  healthProfession     HealthProfession?                   @relation(fields: [healthProfessionId], references: [id], onDelete: Restrict)
+  user                 User                                                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  healthProfession     HealthProfession?                                   @relation(fields: [healthProfessionId], references: [id], onDelete: Restrict)
   specialties          ProfessionalApplicationSpecialty[]
   credentials          ProfessionalApplicationCredential[]
   regulatoryIdentities ProfessionalRegulatoryIdentity[]
@@ -675,8 +708,10 @@ model ProfessionalApplication {
   assets               ProfessionalApplicationAsset[]
   snapshots            ProfessionalApplicationSnapshot[]
   reviewLogs           ProfessionalApplicationReviewLog[]
+  documentEvidence     ProfessionalApplicationCredentialDocumentEvidence[]
 
   @@unique([userId, cycleNumber])
+  @@unique([id, userId])
   @@index([userId, status])
   @@index([status, submittedAt, createdAt])
   @@index([healthProfessionId, status])
@@ -719,14 +754,16 @@ model ProfessionalCredential {
   createdAt                    DateTime                     @default(now()) @db.Timestamptz(3)
   updatedAt                    DateTime                     @updatedAt @db.Timestamptz(3)
 
-  user                  User                                @relation("ProfessionalCredentialOwner", fields: [userId], references: [id], onDelete: Restrict)
-  institution           Institution?                        @relation(fields: [institutionId], references: [id], onDelete: SetNull)
-  registrationAuthority RegistrationAuthority?              @relation(fields: [registrationAuthorityId], references: [id], onDelete: Restrict)
-  verifiedBy            User?                               @relation("ProfessionalCredentialVerifier", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+  user                  User                                                @relation("ProfessionalCredentialOwner", fields: [userId], references: [id], onDelete: Restrict)
+  institution           Institution?                                        @relation(fields: [institutionId], references: [id], onDelete: SetNull)
+  registrationAuthority RegistrationAuthority?                              @relation(fields: [registrationAuthorityId], references: [id], onDelete: Restrict)
+  verifiedBy            User?                                               @relation("ProfessionalCredentialVerifier", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
   applications          ProfessionalApplicationCredential[]
   documents             CredentialDocument[]
+  documentEvidence      ProfessionalApplicationCredentialDocumentEvidence[]
 
   @@unique([countryCode, registrationAuthorityId, registrationNumberNormalized], map: "ProfessionalCredential_registry_identity_key")
+  @@unique([id, userId])
   @@index([userId, deletedAt])
   @@index([registrationAuthorityId, registrationNumberNormalized])
   @@index([verificationStatus, createdAt])
@@ -740,10 +777,12 @@ model ProfessionalApplicationCredential {
   sortOrder     Int      @default(0)
   createdAt     DateTime @default(now()) @db.Timestamptz(3)
 
-  application ProfessionalApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  credential  ProfessionalCredential  @relation(fields: [credentialId], references: [id], onDelete: Restrict)
+  application      ProfessionalApplication                             @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  credential       ProfessionalCredential                              @relation(fields: [credentialId], references: [id], onDelete: Restrict)
+  documentEvidence ProfessionalApplicationCredentialDocumentEvidence[]
 
   @@unique([applicationId, credentialId])
+  @@unique([id, applicationId, credentialId])
   @@index([credentialId])
 }
 
@@ -759,15 +798,19 @@ model CredentialDocument {
   sizeBytes       Int
   checksumSha256  String                 @db.Char(64)
   pageCount       Int?
+  width           Int?
+  height          Int?
   scanStatus      DocumentScanStatus     @default(PENDING)
   scannedAt       DateTime?              @db.Timestamptz(3)
   deletedAt       DateTime?              @db.Timestamptz(3)
   createdAt       DateTime               @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime               @updatedAt @db.Timestamptz(3)
 
-  credential ProfessionalCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  credential       ProfessionalCredential                              @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  documentEvidence ProfessionalApplicationCredentialDocumentEvidence[]
 
   @@unique([storageProvider, publicId])
+  @@unique([id, credentialId])
   @@index([credentialId, deletedAt])
   @@index([scanStatus, createdAt])
 }
@@ -852,12 +895,94 @@ model ProfessionalApplicationSnapshot {
   payloadHash   String   @db.Char(64)
   createdAt     DateTime @default(now()) @db.Timestamptz(3)
 
-  application        ProfessionalApplication            @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  application        ProfessionalApplication                             @relation(fields: [applicationId], references: [id], onDelete: Restrict)
   reviewLogs         ProfessionalApplicationReviewLog[]
   professionalAccess ProfessionalAccess?
+  documentEvidence   ProfessionalApplicationCredentialDocumentEvidence[]
 
   @@unique([applicationId, revision])
+  @@unique([id, applicationId, revision])
   @@index([applicationId, createdAt])
+}
+
+model ProfessionalApplicationCredentialDocumentEvidence {
+  id                      String                            @id @default(uuid()) @db.Uuid
+  applicationId           String
+  applicantUserId         String
+  snapshotId              String
+  snapshotRevision        Int
+  applicationCredentialId String
+  credentialId            String
+  credentialDocumentId    String
+  evidenceType            CredentialDocumentKind
+  mimeType                String                            @db.VarChar(100)
+  format                  String                            @db.VarChar(20)
+  resourceType            String                            @db.VarChar(20)
+  sizeBytes               Int
+  pageCount               Int?
+  width                   Int?
+  height                  Int?
+  checksumSha256          String                            @db.Char(64)
+  scanStatusAtSubmit      DocumentScanStatus
+  captureSource           ProfessionalEvidenceCaptureSource
+  includedAt              DateTime                          @default(now()) @db.Timestamptz(3)
+
+  application           ProfessionalApplication              @relation(fields: [applicationId, applicantUserId], references: [id, userId], onDelete: Restrict, map: "PAEvidence_application_applicant_fkey")
+  snapshot              ProfessionalApplicationSnapshot      @relation(fields: [snapshotId, applicationId, snapshotRevision], references: [id, applicationId, revision], onDelete: Restrict, map: "PAEvidence_snapshot_revision_fkey")
+  applicationCredential ProfessionalApplicationCredential    @relation(fields: [applicationCredentialId, applicationId, credentialId], references: [id, applicationId, credentialId], onDelete: Restrict, map: "PAEvidence_application_credential_fkey")
+  credential            ProfessionalCredential               @relation(fields: [credentialId, applicantUserId], references: [id, userId], onDelete: Restrict, map: "PAEvidence_credential_applicant_fkey")
+  credentialDocument    CredentialDocument                   @relation(fields: [credentialDocumentId, credentialId], references: [id, credentialId], onDelete: Restrict, map: "PAEvidence_document_credential_fkey")
+  retention             ProfessionalEvidenceRetention?
+  retentionEvents       ProfessionalEvidenceRetentionEvent[]
+
+  @@unique([snapshotId, credentialDocumentId])
+  @@index([applicationId, includedAt])
+  @@index([applicantUserId, includedAt])
+  @@index([credentialId, includedAt], map: "PAEvidence_credential_included_idx")
+  @@index([credentialDocumentId], map: "PAEvidence_document_idx")
+  @@index([snapshotId, snapshotRevision])
+}
+
+model ProfessionalEvidenceRetention {
+  evidenceId         String                              @id @db.Uuid
+  status             ProfessionalEvidenceRetentionStatus @default(HELD)
+  retentionHoldUntil DateTime?                           @db.Timestamptz(3)
+  deleteRequestedAt  DateTime?                           @db.Timestamptz(3)
+  releaseEligibleAt  DateTime?                           @db.Timestamptz(3)
+  releasedAt         DateTime?                           @db.Timestamptz(3)
+  releaseReasonCode  String?                             @db.VarChar(80)
+  binaryStatus       ProfessionalEvidenceBinaryStatus    @default(PRESENT)
+  lastStorageCheckAt DateTime?                           @db.Timestamptz(3)
+  updatedByUserId    String?
+  version            Int                                 @default(1)
+  updatedAt          DateTime                            @updatedAt @db.Timestamptz(3)
+
+  evidence  ProfessionalApplicationCredentialDocumentEvidence @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+  updatedBy User?                                             @relation("ProfessionalEvidenceRetentionUpdater", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([status, retentionHoldUntil])
+  @@index([binaryStatus, lastStorageCheckAt])
+  @@index([updatedByUserId, updatedAt])
+}
+
+model ProfessionalEvidenceRetentionEvent {
+  id             String                               @id @default(uuid()) @db.Uuid
+  evidenceId     String                               @db.Uuid
+  actorUserId    String?
+  action         ProfessionalEvidenceRetentionAction
+  previousStatus ProfessionalEvidenceRetentionStatus?
+  newStatus      ProfessionalEvidenceRetentionStatus
+  reasonCode     String?                              @db.VarChar(80)
+  requestId      String?                              @db.VarChar(120)
+  idempotencyKey String?                              @unique @db.VarChar(120)
+  createdAt      DateTime                             @default(now()) @db.Timestamptz(3)
+
+  evidence ProfessionalApplicationCredentialDocumentEvidence @relation(fields: [evidenceId], references: [id], onDelete: Restrict)
+  actor    User?                                             @relation("ProfessionalEvidenceRetentionActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([evidenceId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
 }
 
 model ProfessionalAccess {
