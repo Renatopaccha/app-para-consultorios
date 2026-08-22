@@ -3,6 +3,7 @@ import type { UploadApiOptions, UploadApiResponse } from 'cloudinary';
 import { inspectCertificationDocument } from './certificationDocument.service';
 import { ImageValidationError, inspectImage } from './image.service';
 import { configuredCloudinary } from '../config/cloudinary';
+import { onboardingCredentialDocumentFolder } from './professionalOnboardingDocumentPolicy';
 
 export const ONBOARDING_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const ONBOARDING_DOCUMENT_MAX_BYTES = 8 * 1024 * 1024;
@@ -106,7 +107,7 @@ export async function uploadOnboardingCredentialDocument(
     throw new OnboardingStorageError(code, error instanceof Error ? error.message : 'Documento no válido.', code === 'DOCUMENT_TOO_LARGE' ? 413 : 422);
   }
   const options: UploadApiOptions = {
-    folder: pathFor(applicationId, `credentials/${credentialId}`),
+    folder: onboardingCredentialDocumentFolder(applicationId, credentialId),
     public_id: `document-${crypto.randomUUID()}`,
     resource_type: inspected.resourceType,
     type: 'authenticated',

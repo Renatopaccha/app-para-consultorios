@@ -28,6 +28,29 @@ async function catalogs() {
   return { profession, otherProfession, specialty, otherSpecialty, spanish, english };
 }
 
+async function attachEligiblePrimaryCredential(userId: string, applicationId: string) {
+  const credential = await prisma.professionalCredential.create({ data: {
+    userId,
+    credentialType: 'PRIMARY_DEGREE',
+    countryCode: 'EC',
+    exactTitle: 'Médico',
+    institutionNameSnapshot: 'Universidad de prueba',
+  } });
+  await prisma.professionalApplicationCredential.create({ data: { applicationId, credentialId: credential.id, isPrimary: true } });
+  await prisma.credentialDocument.create({ data: {
+    credentialId: credential.id,
+    storageProvider: 'cloudinary',
+    publicId: `zenda/professional-onboarding/applications/${applicationId}/credentials/${credential.id}/document-${sequence}`,
+    resourceType: 'raw',
+    format: 'pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 100,
+    checksumSha256: 'a'.repeat(64),
+    scanStatus: 'PENDING',
+  } });
+  return credential;
+}
+
 describe('professional onboarding HTTP', () => {
   beforeAll(() => assertIntegrationDatabase());
   beforeEach(async () => clearIntegrationDatabase());
@@ -143,6 +166,8 @@ describe('professional onboarding HTTP', () => {
     const location = await request(app).put('/api/professional-onboarding/location').set(auth(actor.token)).send({
       expectedRevision: identity.body.currentRevision, countryCode: 'EC', city: 'Quito', street1: 'Av. Principal', floorNumber: 0,
     }).expect(200);
+    const application = await prisma.professionalApplication.findFirstOrThrow({ where: { userId: actor.user.id } });
+    await attachEligiblePrimaryCredential(actor.user.id, application.id);
     const first = await request(app).post('/api/professional-onboarding/submit').set(auth(actor.token)).set('Idempotency-Key', 'submit-valid-1').send({ expectedRevision: location.body.currentRevision }).expect(200);
     const retry = await request(app).post('/api/professional-onboarding/submit').set(auth(actor.token)).set('Idempotency-Key', 'submit-valid-1').send({ expectedRevision: location.body.currentRevision }).expect(200);
     expect(first.body).toMatchObject({ idempotent: false, application: { status: 'PENDING_REVIEW' } });

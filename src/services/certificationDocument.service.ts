@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { UploadApiOptions, UploadApiResponse } from 'cloudinary';
 import { ImageValidationError, inspectImage } from './image.service';
 import { configuredCloudinary } from '../config/cloudinary';
+import { ONBOARDING_CREDENTIAL_DOCUMENT_MIME_TYPES } from './professionalOnboardingDocumentPolicy';
 
 export const CERTIFICATION_MAX_BYTES = 8 * 1024 * 1024;
 const MAX_PDF_PAGES = 50;
@@ -45,6 +46,9 @@ function inspectPdf(buffer: Buffer) {
 export function inspectCertificationDocument(buffer: Buffer, declaredMime: string) {
   if (!buffer.length) throw new CertificationDocumentError('EMPTY_DOCUMENT', 'El documento está vacío.');
   if (buffer.length > CERTIFICATION_MAX_BYTES) throw new CertificationDocumentError('DOCUMENT_TOO_LARGE', 'El documento excede el límite de 8 MB.');
+  if (!(ONBOARDING_CREDENTIAL_DOCUMENT_MIME_TYPES as readonly string[]).includes(declaredMime)) {
+    throw new CertificationDocumentError('INVALID_DOCUMENT', 'El tipo de documento no está permitido.');
+  }
   if (declaredMime === 'application/pdf') {
     inspectPdf(buffer);
     return { mimeType: 'application/pdf' as const, format: 'pdf' as const, resourceType: 'raw' as const };

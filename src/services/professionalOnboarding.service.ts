@@ -7,6 +7,14 @@ import {
 } from '../../generated/prisma';
 import prisma from '../prisma';
 import { normalizeLocationProviderCode } from '../providers/location';
+import {
+  CREDENTIAL_SUBMIT_POLICY_VERSION,
+  evaluateCredentialSubmitPolicy,
+} from './professionalCredentialSubmitPolicy';
+import type {
+  CredentialSubmitManifest,
+  CredentialSubmitViolation,
+} from './professionalCredentialSubmitPolicy';
 import type {
   CredentialWriteDto,
   IdentityAutosaveDto,
@@ -41,7 +49,11 @@ export class ProfessionalOnboardingError extends Error {
     public readonly code: ProfessionalOnboardingErrorCode,
     public readonly status: number,
     message: string,
-    public readonly details?: { fields?: string[] },
+    public readonly details?: {
+      fields?: string[];
+      policyVersion?: typeof CREDENTIAL_SUBMIT_POLICY_VERSION;
+      violations?: CredentialSubmitViolation[];
+    },
   ) {
     super(message);
   }
@@ -240,6 +252,53 @@ function completion(application: ApplicationAggregate) {
 
 async function loadAggregate(client: Prisma.TransactionClient | typeof prisma, id: string): Promise<ApplicationAggregate> {
   return client.professionalApplication.findUniqueOrThrow({ where: { id }, include: applicationInclude });
+}
+
+async function loadCredentialSubmitManifest(
+  client: Prisma.TransactionClient,
+  application: ApplicationAggregate,
+): Promise<CredentialSubmitManifest> {
+  const links = await client.professionalApplicationCredential.findMany({
+    where: { applicationId: application.id },
+    select: {
+      applicationId: true,
+      isPrimary: true,
+      credential: {
+        select: {
+          id: true,
+          userId: true,
+          credentialType: true,
+          deletedAt: true,
+          documents: {
+            select: {
+              credentialId: true,
+              storageProvider: true,
+              publicId: true,
+              resourceType: true,
+              format: true,
+              mimeType: true,
+              scanStatus: true,
+              deletedAt: true,
+            },
+          },
+        },
+      },
+    },
+  });
+  return {
+    applicationId: application.id,
+    userId: application.userId,
+    declaredSpecialtyCount: application.specialties.length,
+    credentials: links.map(({ applicationId, isPrimary, credential }) => ({
+      applicationId,
+      credentialId: credential.id,
+      credentialUserId: credential.userId,
+      credentialType: credential.credentialType,
+      isPrimary,
+      deletedAt: credential.deletedAt,
+      documents: credential.documents,
+    })),
+  };
 }
 
 export async function getProfessionalOnboardingBootstrap(userId: string) {
@@ -512,7 +571,7 @@ export function validateAggregateForSubmit(application: ApplicationAggregate): s
 
 function snapshotPayload(application: ApplicationAggregate, revision: number) {
   const aggregate = publicAggregate(application);
-  return {
+  const payload = {
     schemaVersion: SNAPSHOT_SCHEMA_VERSION,
     revision,
     application: {
@@ -525,6 +584,9 @@ function snapshotPayload(application: ApplicationAggregate, revision: number) {
       updatedAt: undefined,
     },
   };
+  // Hash exactly the JSON representation Prisma persists. In particular,
+  // document timestamps must be ISO strings rather than in-memory Date objects.
+  return JSON.parse(JSON.stringify(payload)) as Prisma.InputJsonValue;
 }
 
 export function stableJson(value: unknown): string {
@@ -568,15 +630,33 @@ export async function submitProfessionalApplication(userId: string, input: Submi
     if (!EDITABLE_STATUSES.includes(application.status)) throw new ProfessionalOnboardingError('PROFESSIONAL_APPLICATION_INVALID_STATE', 409, 'La solicitud no puede enviarse desde su estado actual.');
     assertEditable(application, input.expectedRevision);
     const aggregate = await loadAggregate(tx, application.id);
-    const fields = validateAggregateForSubmit(aggregate);
-    if (fields.length) throw new ProfessionalOnboardingError('PROFESSIONAL_APPLICATION_VALIDATION_FAILED', 422, 'La solicitud todavía está incompleta.', { fields });
+    const credentialManifest = await loadCredentialSubmitManifest(tx, aggregate);
+    const credentialViolations = evaluateCredentialSubmitPolicy(credentialManifest);
+    const fields = [...new Set([
+      ...validateAggregateForSubmit(aggregate),
+      ...(credentialViolations.length ? ['credentials'] : []),
+    ])];
+    if (fields.length) {
+      throw new ProfessionalOnboardingError(
+        'PROFESSIONAL_APPLICATION_VALIDATION_FAILED',
+        422,
+        'La solicitud todavía está incompleta.',
+        {
+          fields,
+          ...(credentialViolations.length ? {
+            policyVersion: CREDENTIAL_SUBMIT_POLICY_VERSION,
+            violations: credentialViolations,
+          } : {}),
+        },
+      );
+    }
     const revision = application.currentRevision + 1;
     const payload = snapshotPayload(aggregate, revision);
     const snapshot = await tx.professionalApplicationSnapshot.create({ data: {
       applicationId: application.id,
       revision,
       schemaVersion: SNAPSHOT_SCHEMA_VERSION,
-      payload: payload as Prisma.InputJsonValue,
+      payload,
       payloadHash: hashSnapshotPayload(payload),
     } });
     const submittedAt = new Date();

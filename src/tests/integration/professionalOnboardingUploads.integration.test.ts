@@ -129,8 +129,11 @@ describe('professional onboarding secure uploads', () => {
     const profession = await prisma.healthProfession.create({ data: { code: `MED_UP_${sequence}`, name: `Med upload ${sequence}`, nameNormalized: `med upload ${sequence}` } });
     const appRecord = await prisma.professionalApplication.create({ data: { userId: owner.user.id, cycleNumber: 1, status: 'NEEDS_CHANGES', submittedAt: new Date(), legalGivenNames: 'Ana', legalFamilyNames: 'Pérez', primaryPhoneE164: '+593999999999', practiceCountryCode: 'EC', healthProfessionId: profession.id } });
     await prisma.professionalApplicationLocation.create({ data: { applicationId: appRecord.id, countryCode: 'EC', city: 'Quito', street1: 'Principal' } });
+    const primaryCredential = await credential(owner.user.id, appRecord.id);
     const uploaded = await request(app).post('/api/professional-onboarding/assets').set(bearer(owner.token)).field('category', 'AVATAR').field('expectedRevision', '1').attach('file', png(), 'avatar.png').expect(201);
-    await request(app).post('/api/professional-onboarding/submit').set(bearer(owner.token)).set('Idempotency-Key', 'upload-snapshot').send({ expectedRevision: uploaded.body.currentRevision }).expect(200);
+    const document = await request(app).post(`/api/professional-onboarding/credentials/${primaryCredential.id}/documents`).set(bearer(owner.token)).field('expectedRevision', String(uploaded.body.currentRevision)).field('kind', 'PRIMARY_EVIDENCE')
+      .attach('file', pdf, { filename: 'degree.pdf', contentType: 'application/pdf' }).expect(201);
+    await request(app).post('/api/professional-onboarding/submit').set(bearer(owner.token)).set('Idempotency-Key', 'upload-snapshot').send({ expectedRevision: document.body.currentRevision }).expect(200);
     const snapshot = await prisma.professionalApplicationSnapshot.findFirstOrThrow();
     const serialized = JSON.stringify(snapshot.payload);
     expect(serialized).toContain(uploaded.body.asset.id);

@@ -205,7 +205,13 @@ describe('adaptador Clerk/JWT con PostgreSQL real', () => {
     ['PENDING_REVIEW', 5, 'ONBOARDING_STATUS', '/registro-profesional/estado'],
   ] as const)('dirige solicitud %s al destino de onboarding correspondiente', async (status, lastVisitedStep, action, redirectTo) => {
     const patient = await prisma.user.create({ data: { email: `patient-${status.toLowerCase()}@zenda.test`, emailNormalized: `patient-${status.toLowerCase()}@zenda.test`, firstName: 'Patient', lastName: status, role: 'PATIENT' } });
-    await prisma.professionalApplication.create({ data: { userId: patient.id, cycleNumber: 1, status, lastVisitedStep } });
+    await prisma.professionalApplication.create({ data: {
+      userId: patient.id,
+      cycleNumber: 1,
+      status,
+      lastVisitedStep,
+      ...(status === 'PENDING_REVIEW' ? { submittedAt: new Date() } : {}),
+    } });
 
     const response = await request(app).post('/api/auth/resolve-portal')
       .set('Authorization', `Bearer ${generateToken({ id: patient.id, role: patient.role })}`)
